@@ -2,7 +2,7 @@ name: Build & Deploy BTC Trade Bot
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   workflow_dispatch:
 
 env:
