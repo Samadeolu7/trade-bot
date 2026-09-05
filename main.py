@@ -89,6 +89,18 @@ def main() -> None:
     backtest_parser.add_argument("--timeframe", required=True)
     backtest_parser.add_argument("--start", default=None, help="ISO8601, restricts the backtest window")
     backtest_parser.add_argument("--end", default=None, help="ISO8601, restricts the backtest window")
+    backtest_parser.add_argument(
+        "--trend-strategy",
+        choices=["ema_cross", "donchian"],
+        default=None,
+        help="only for --strategy regime_switched: overrides strategy.regime_switched.trend_strategy",
+    )
+    backtest_parser.add_argument(
+        "--regime-type",
+        choices=["adx", "sma200"],
+        default=None,
+        help="only for --strategy regime_switched: overrides strategy.regime.type",
+    )
 
     args = parser.parse_args()
 
@@ -122,6 +134,21 @@ def main() -> None:
 
         strategy_config = config.get("strategy", {})
         backtest_config = config.get("backtest", {})
+
+        if args.trend_strategy:
+            strategy_config = {
+                **strategy_config,
+                "regime_switched": {
+                    **strategy_config.get("regime_switched", {}),
+                    "trend_strategy": args.trend_strategy,
+                },
+            }
+        if args.regime_type:
+            strategy_config = {
+                **strategy_config,
+                "regime": {**strategy_config.get("regime", {}), "type": args.regime_type},
+            }
+
         strategy = _build_strategy(args.strategy, strategy_config)
 
         result = run_backtest(

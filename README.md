@@ -51,10 +51,12 @@ A pluggable `Strategy` interface (`bot/strategy/base.py`) plus:
   stop, rather than a separate close-only exit path.
 - `regime_switched` — a `RegimeFilter` (spec Section 6) that runs a trend strategy while "trending"
   and `rsi_bb` while "ranging", so the bot adapts instead of firing one static rule. Which trend
-  strategy (`ema_cross`/`donchian`) and which regime filter (`adx`/`sma200`) are config-driven, not
-  separate `--strategy` choices — see `strategy.regime_switched.trend_strategy` and `strategy.regime.type`
-  in `config/config.yaml`. An independent backtest found `sma200` the stronger risk-adjusted primary
-  switch, with ADX as secondary confirmation (`strategy.regime_sma`) — worth comparing against `adx`.
+  strategy (`ema_cross`/`donchian`) and which regime filter (`adx`/`sma200`) are config-driven
+  (`strategy.regime_switched.trend_strategy`, `strategy.regime.type` in `config/config.yaml`), with
+  `--trend-strategy`/`--regime-type` as one-off CLI overrides for comparing combos without editing
+  the file baked into the Docker image. An independent backtest found `sma200` the stronger
+  risk-adjusted primary switch, with ADX as secondary confirmation (`strategy.regime_sma`) — worth
+  comparing against `adx`.
 
 Indicators (EMA/RSI/Bollinger/ATR/ADX) are hand-implemented in `bot/indicators/` rather than via
 `pandas-ta`/`vectorbt` as the spec's stack table suggests — avoids adding a numba/JIT dependency to
