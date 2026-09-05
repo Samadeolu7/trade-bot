@@ -1,14 +1,36 @@
 import argparse
 import logging
 
+import pandas as pd
+
+from bot.backtest.engine import run_backtest
+from bot.backtest.metrics import summarize
 from bot.config import load_config
 from bot.data.backfill import backfill_candles
 from bot.data.exchange import create_exchange
 from bot.data.poll import run_poll_loop
 from bot.logging_setup import configure_logging
-from bot.storage.db import connect
+from bot.storage.db import connect, query_candles_df
+from bot.strategy.ema_cross import EmaCrossStrategy
+from bot.strategy.regime import RegimeFilter
+from bot.strategy.regime_switch import RegimeSwitchedStrategy
+from bot.strategy.rsi_bb import RsiBollingerStrategy
+from bot.strategy.base import Strategy
 
 logger = logging.getLogger(__name__)
+
+STRATEGY_CHOICES = ["ema_cross", "rsi_bb", "regime_switched"]
+
+
+def _build_strategy(name: str, strategy_config: dict) -> Strategy:
+    ema_strategy = EmaCrossStrategy(strategy_config.get("ema_cross", {}))
+    rsi_strategy = RsiBollingerStrategy(strategy_config.get("rsi_bb", {}))
+    if name == "ema_cross":
+        return ema_strategy
+    if name == "rsi_bb":
+        return rsi_strategy
+    regime_filter = RegimeFilter(**strategy_config.get("regime", {}))
+    return RegimeSwitchedStrategy(ema_strategy, rsi_strategy, regime_filter)
 
 
 def main() -> None:
@@ -34,6 +56,15 @@ def main() -> None:
     poll_parser.add_argument("--timeframe", default=None)
     poll_parser.add_argument("--interval", type=int, default=None, help="seconds between polls")
 
+    backtest_parser = subparsers.add_parser(
+        "backtest", help="Backtest a strategy against stored candles"
+    )
+    backtest_parser.add_argument("--strategy", choices=STRATEGY_CHOICES, required=True)
+    backtest_parser.add_argument("--symbol", default=None)
+    backtest_parser.add_argument("--timeframe", required=True)
+    backtest_parser.add_argument("--start", default=None, help="ISO8601, restricts the backtest window")
+    backtest_parser.add_argument("--end", default=None, help="ISO8601, restricts the backtest window")
+
     args = parser.parse_args()
 
     config = load_config()
@@ -56,6 +87,37 @@ def main() -> None:
         timeframe = args.timeframe or config["poll"]["timeframe"]
         interval = args.interval or config["poll"]["interval_seconds"]
         run_poll_loop(exchange, conn, exchange_id, symbol, timeframe, interval)
+
+    elif args.command == "backtest":
+        df = query_candles_df(conn, exchange_id, symbol, args.timeframe)
+        if args.start:
+            df = df[df.index >= pd.Timestamp(args.start)]
+        if args.end:
+            df = df[df.index <= pd.Timestamp(args.end)]
+
+        strategy_config = config.get("strategy", {})
+        backtest_config = config.get("backtest", {})
+        strategy = _build_strategy(args.strategy, strategy_config)
+
+        result = run_backtest(
+            df,
+            strategy,
+            fee=backtest_config.get("fee", 0.001),
+            slippage=backtest_config.get("slippage", 0.0005),
+            initial_capital=backtest_config.get("initial_capital", 10_000.0),
+            risk_pct=backtest_config.get("risk_pct", 0.01),
+        )
+        summary = summarize(
+            result.trades,
+            result.equity_curve,
+            backtest_config.get("initial_capital", 10_000.0),
+            args.timeframe,
+        )
+        logger.info(
+            "backtest complete: %s %s %s over %d candles -> %s",
+            args.strategy, symbol, args.timeframe, len(df), summary,
+        )
+        print(summary)
 
 
 if __name__ == "__main__":

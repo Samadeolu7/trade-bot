@@ -1,0 +1,39 @@
+import pandas as pd
+
+from bot.strategy.base import Direction, Signal, Strategy
+from bot.strategy.regime import RegimeFilter
+
+
+class RegimeSwitchedStrategy(Strategy):
+    """Composite strategy (spec Section 6): delegates to a trend-following
+    strategy while RegimeFilter reports "trending", and a mean-reversion
+    strategy while it reports "ranging". Tracks which sub-strategy opened the
+    current position so trailing-stop updates are delegated correctly even
+    after the regime has since flipped."""
+
+    name = "regime_switched"
+
+    def __init__(self, trending: Strategy, ranging: Strategy, regime_filter: RegimeFilter):
+        super().__init__({})
+        self.trending = trending
+        self.ranging = ranging
+        self.regime_filter = regime_filter
+        self.min_lookback = max(
+            trending.min_lookback, ranging.min_lookback, regime_filter.min_lookback
+        )
+        self._active: Strategy | None = None
+
+    def generate_signal(self, df: pd.DataFrame) -> Signal | None:
+        regime = self.regime_filter.regime(df)
+        if regime is None:
+            return None
+        sub = self.trending if regime == "trending" else self.ranging
+        signal = sub.generate_signal(df)
+        if signal is not None:
+            self._active = sub
+        return signal
+
+    def trail_stop(self, df: pd.DataFrame, direction: Direction, current_stop: float) -> float:
+        if self._active is None:
+            return current_stop
+        return self._active.trail_stop(df, direction, current_stop)
