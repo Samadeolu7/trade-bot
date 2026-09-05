@@ -47,6 +47,20 @@ def test_position_size_zero_when_stop_equals_entry():
     assert position_size(10_000, 0.01, entry_price=100, stop_loss=100) == 0.0
 
 
+def test_position_size_capped_at_affordable_no_leverage():
+    # a tight stop relative to a high price (e.g. BTC's real scale) would
+    # otherwise imply buying far more notional than equity can afford —
+    # not achievable on a real spot account with no margin
+    equity, risk_pct, entry_price, stop_loss = 10_000, 0.01, 30_000, 29_950  # $50 stop
+    risk_based = (equity * risk_pct) / abs(entry_price - stop_loss)
+    assert risk_based * entry_price > equity  # confirms this case would otherwise over-leverage
+
+    size = position_size(equity, risk_pct, entry_price, stop_loss)
+
+    assert size == pytest.approx(equity / entry_price)  # capped, not risk_based
+    assert size * entry_price <= equity + 1e-9  # notional never exceeds available equity
+
+
 def test_long_trade_take_profit_no_fees():
     df = make_df(
         [

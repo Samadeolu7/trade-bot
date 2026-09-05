@@ -29,11 +29,16 @@ class BacktestResult:
 
 def position_size(equity: float, risk_pct: float, entry_price: float, stop_loss: float) -> float:
     """Size off the stop-loss distance (spec Section 7): risk a fixed % of
-    equity, not a fixed coin amount."""
+    equity, not a fixed coin amount. Capped at what equity can actually buy —
+    Quidax is spot-only, no margin (spec Section 2), so a tight stop (small
+    ATR relative to price) must not imply a notional position worth many
+    times the account's equity."""
     stop_distance = abs(entry_price - stop_loss)
-    if stop_distance <= 0:
+    if stop_distance <= 0 or entry_price <= 0:
         return 0.0
-    return (equity * risk_pct) / stop_distance
+    risk_based_size = (equity * risk_pct) / stop_distance
+    max_affordable_size = equity / entry_price
+    return min(risk_based_size, max_affordable_size)
 
 
 def _open_position(signal: Signal, size: float, fee: float, slippage: float, owner: Strategy) -> dict:
