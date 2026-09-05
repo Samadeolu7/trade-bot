@@ -10,7 +10,7 @@ services:
     volumes:
       - trade_bot_data:/app/data
       - trade_bot_logs:/app/logs
-    command: ["python", "main.py", "poll"]
+    command: ["python", "main.py", "shadow"]
 
 volumes:
   trade_bot_data:

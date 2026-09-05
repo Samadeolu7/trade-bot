@@ -55,3 +55,6 @@ backtest:
   slippage: 0.0005
   initial_capital: 10000.0
   risk_pct: 0.01      # fraction of equity risked per trade, sized off stop distance
+
+alerting:
+  heartbeat_interval_seconds: 86400  # Phase 4 (spec Section 9) — once/day is enough to confirm the process is alive

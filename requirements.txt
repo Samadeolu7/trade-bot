@@ -2,4 +2,5 @@ ccxt
 pandas
 PyYAML
 python-dotenv
+requests
 pytest

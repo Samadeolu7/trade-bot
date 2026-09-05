@@ -1,9 +1,11 @@
 import argparse
 import itertools
 import logging
+import os
 
 import pandas as pd
 
+from bot.alerting.telegram import TelegramAlerter
 from bot.backtest.engine import run_backtest
 from bot.backtest.metrics import breakdown_by_strategy, summarize
 from bot.config import load_config
@@ -11,6 +13,7 @@ from bot.data.backfill import backfill_candles
 from bot.data.exchange import create_exchange
 from bot.data.poll import run_poll_loop
 from bot.logging_setup import configure_logging
+from bot.shadow.runner import run_shadow_loop
 from bot.storage.db import connect, query_candles_df
 from bot.strategy.donchian import DonchianBreakoutStrategy
 from bot.strategy.ema_cross import EmaCrossStrategy
@@ -250,6 +253,15 @@ def main() -> None:
         help="sort the printed table by this metric, best first",
     )
 
+    shadow_parser = subparsers.add_parser(
+        "shadow",
+        help="Phase 4: run the finalized strategy live in paper/alert-only mode — "
+        "no orders placed, ever, at this stage",
+    )
+    shadow_parser.add_argument("--symbol", default=None)
+    shadow_parser.add_argument("--timeframe", default=None)
+    shadow_parser.add_argument("--interval", type=int, default=None, help="seconds between checks")
+
     args = parser.parse_args()
 
     config = load_config()
@@ -359,6 +371,35 @@ def main() -> None:
         )
         for params_label, summary in rows:
             print(f"{params_label} -> {summary}")
+
+    elif args.command == "shadow":
+        timeframe = args.timeframe or config["poll"]["timeframe"]
+        interval = args.interval or config["poll"]["interval_seconds"]
+        strategy_config = config.get("strategy", {})
+        backtest_config = config.get("backtest", {})
+        alerting_config = config.get("alerting", {})
+
+        # Always the finalized strategy (spec Phase 4) — donchian trend,
+        # flat during ranging (Section 8 findings), not a --strategy choice.
+        strategy = _build_strategy("regime_switched", strategy_config)
+
+        alerter = TelegramAlerter(
+            os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
+        )
+        if not alerter.enabled:
+            logger.warning(
+                "TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set in .env — "
+                "shadow run continues, but alerts will only be logged, not sent"
+            )
+
+        run_shadow_loop(
+            exchange, conn, alerter, exchange_id, symbol, timeframe, strategy,
+            fee=backtest_config.get("fee", 0.001),
+            slippage=backtest_config.get("slippage", 0.0005),
+            backfill_start_date=config["backfill"]["start_date"],
+            interval_seconds=interval,
+            heartbeat_interval_seconds=alerting_config.get("heartbeat_interval_seconds", 86400),
+        )
 
 
 if __name__ == "__main__":

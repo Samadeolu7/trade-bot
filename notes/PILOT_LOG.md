@@ -82,3 +82,76 @@ because the edge (if any) hasn't been confirmed, not despite that.
 
 Deleting `.github/workflows/cross-asset-validation.yml` now that its numbers
 are captured, per its own header comment (not meant as permanent CI).
+
+## Step 4 — Telegram alerting (Phase 3)
+
+Nothing existed yet (checked `bot/` before building anything, per the
+instruction not to assume). Added:
+- `bot/alerting/telegram.py` — thin `requests`-based wrapper (`TelegramAlerter`)
+  around Telegram's sendMessage API. Never raises; a failed/unsent alert logs
+  and returns `False` rather than crashing the shadow loop. Disabled
+  gracefully (logs at WARNING, drops the message) when bot_token/chat_id
+  aren't set, so the bot works and is testable before Telegram is configured.
+- `bot/alerting/messages.py` — structured `key=value` formatting (spec
+  Section 9: "consistent and parseable... in case it's parsed
+  programmatically later") for: SIGNAL_FIRED, POSITION_CLOSED, DAILY_SUMMARY,
+  HEARTBEAT, ERROR.
+- `.env.example` already had `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`
+  placeholders from an earlier phase — nothing to add there. **You need to
+  fill in the real values in `/opt/btc-trade-bot/.env` on the VPS** (SSH in,
+  edit the file, `docker compose up -d` to pick it up) — the deployed `.env`
+  is currently empty (auto-created by deploy.yml the first time, back when
+  Phase 1 needed no secrets), so alerts are being logged, not sent, until
+  then. Get the bot token from @BotFather and the chat ID by messaging your
+  bot once and checking `https://api.telegram.org/bot<token>/getUpdates`.
+- Added `requests` to requirements.txt explicitly (was only an indirect ccxt
+  dependency before — importing it directly without declaring it would break
+  if ccxt ever dropped it).
+
+## Step 5 — Shadow run (Phase 4)
+
+- Renamed `engine.py`'s `_open_position`/`_check_exit`/`_close_position` to
+  drop the underscore prefix (`open_position`/`check_exit`/`close_position`)
+  and documented them as reused by the shadow runner — the whole point of a
+  shadow run is comparing live behavior to backtest expectations, so live and
+  backtested exit/pnl math must be the exact same code, not a parallel
+  reimplementation that can quietly drift.
+- Added SQLite tables (`bot/storage/db.py`): `signals` (every signal fired),
+  `paper_position` (the current open paper position, if any — persisted so a
+  restart doesn't forget it), `paper_trades` (completed round-trips),
+  `bot_state` (tiny key-value store for heartbeat/summary scheduling that
+  needs to survive restarts). Matches spec Section 11's storage requirement.
+- Added `bot/shadow/runner.py` (`shadow_poll_once`, `run_shadow_loop`) — the
+  live loop. Two things I want you to specifically double-check when you're
+  back:
+  1. **Completed-bar handling**: the exchange's latest candle is still
+     forming until its period ends; evaluating signals/exits against it
+     would react to intraday-changing data the backtest never saw. Every
+     iteration drops it (`_drop_incomplete_bar`) before doing anything, and
+     only acts once a bar is genuinely finished. Tested directly, plus an
+     end-to-end test using the *actual* production `regime_switched`
+     strategy (not a stub) to catch integration bugs a fake strategy
+     couldn't reveal.
+  2. **Gap/restart safety**: each iteration calls `backfill_candles(...,
+     resume=True)` rather than the old `poll_once` (which only ever fetched
+     the latest 2 candles) — this catches up correctly regardless of how
+     long the process was down, in the same code path as routine updates.
+  3. Duplicate-alert risk (same signal re-firing every poll while the
+     completed bar hasn't changed) is handled by the existing open/flat
+     state machine, not extra dedup bookkeeping — once a position opens and
+     persists, the entry branch is skipped on every subsequent iteration
+     until it closes. Verified with a direct test
+     (`test_does_not_reevaluate_entries_while_position_open`).
+- `python main.py shadow` — no `--strategy` flag; always builds
+  `regime_switched` (donchian trend / flat ranging per Step 3), since Phase 4
+  is meant to run *the* finalized strategy, not a general-purpose selector.
+- **docker-compose.yml's deployed command changed from `poll` to `shadow`** —
+  `shadow` already keeps candles fresh via its own resumable backfill call,
+  so there's no need to run the old `poll` service alongside it.
+- Pushed and confirmed the deploy workflow succeeded (image built, container
+  restarted). I **cannot** confirm from here that the process is actually
+  behaving correctly at runtime — only that Docker reports it started. Please
+  check `docker compose logs -f trade-bot` at `/opt/btc-trade-bot` when back;
+  a `HEARTBEAT` line should appear within `alerting.heartbeat_interval_seconds`
+  (default 24h) once Telegram is configured, and `polled`/backfill-style log
+  lines should appear every `poll.interval_seconds` (300s) regardless.

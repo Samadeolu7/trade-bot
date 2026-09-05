@@ -1,0 +1,229 @@
+from unittest.mock import MagicMock
+
+import pandas as pd
+
+from bot.backtest.engine import open_position as engine_open_position
+from bot.shadow.runner import _drop_incomplete_bar, shadow_poll_once
+from bot.storage.db import connect, get_open_paper_position, open_paper_position, upsert_candles
+from bot.strategy.base import Signal, Strategy
+
+
+class FakeExchange:
+    """Backfill-compatible fake: parse_timeframe as an instance method (like
+    real ccxt), fetch_ohlcv serving pre-scripted pages."""
+
+    def __init__(self, pages):
+        self.pages = list(pages)
+
+    def parse_timeframe(self, timeframe):
+        assert timeframe == "1d"
+        return 86400
+
+    def fetch_ohlcv(self, symbol, timeframe=None, since=None, limit=None):
+        if not self.pages:
+            return []
+        return self.pages.pop(0)
+
+
+class ScriptedStrategy(Strategy):
+    """Returns a fixed signal (or None) regardless of input, and never
+    trails the stop (default base behavior) unless overridden — matches the
+    FakeStrategy pattern already used in test_backtest_engine.py."""
+
+    name = "scripted"
+
+    def __init__(self, signal_to_return: Signal | None, min_lookback: int = 1):
+        super().__init__({})
+        self.signal_to_return = signal_to_return
+        self.min_lookback = min_lookback
+
+    def generate_signal(self, df):
+        return self.signal_to_return
+
+
+def day_ms(n_days_ago: int) -> int:
+    ts = pd.Timestamp.now(tz="UTC").normalize() - pd.Timedelta(days=n_days_ago)
+    return int(ts.value // 1_000_000)
+
+
+def seed_complete_history(conn, n_days=10, close=100.0):
+    """n_days of fully-completed daily candles, the most recent being
+    yesterday — "today" is deliberately never seeded here, so tests control
+    it explicitly when they need to."""
+    candles = [[day_ms(d), close, close + 0.5, close - 0.5, close, 1.0] for d in range(n_days, 0, -1)]
+    upsert_candles(conn, "binance", "BTC/USDT", "1d", candles)
+
+
+def make_conn(tmp_path):
+    return connect(str(tmp_path / "shadow.db"))
+
+
+def test_skips_when_not_enough_complete_history(tmp_path):
+    conn = make_conn(tmp_path)
+    seed_complete_history(conn, n_days=2)
+    exchange = FakeExchange(pages=[[]])
+    alerter = MagicMock()
+    strategy = ScriptedStrategy(signal_to_return=None, min_lookback=100)
+
+    shadow_poll_once(
+        exchange, conn, alerter, "binance", "BTC/USDT", "1d", strategy,
+        fee=0.001, slippage=0.0005, backfill_start_date="2020-01-01T00:00:00Z",
+    )
+
+    assert get_open_paper_position(conn, "binance", "BTC/USDT", "1d") is None
+    alerter.send.assert_not_called()
+
+
+def test_opens_paper_position_and_alerts_on_signal(tmp_path):
+    conn = make_conn(tmp_path)
+    seed_complete_history(conn, n_days=10)
+    exchange = FakeExchange(pages=[[]])
+    alerter = MagicMock()
+    signal = Signal(
+        symbol="", timeframe="", direction="long", entry_price=100.0, stop_loss=90.0,
+        take_profit=None, reason="test breakout", timestamp=pd.Timestamp.now(tz="UTC"),
+    )
+    strategy = ScriptedStrategy(signal_to_return=signal, min_lookback=1)
+
+    shadow_poll_once(
+        exchange, conn, alerter, "binance", "BTC/USDT", "1d", strategy,
+        fee=0.0, slippage=0.0, backfill_start_date="2020-01-01T00:00:00Z",
+    )
+
+    position = get_open_paper_position(conn, "binance", "BTC/USDT", "1d")
+    assert position is not None
+    assert position["direction"] == "long"
+    assert position["entry_price"] == 100.0
+
+    alerter.send.assert_called_once()
+    assert "SIGNAL_FIRED" in alerter.send.call_args[0][0]
+
+    row = conn.execute("SELECT direction, reason FROM signals").fetchone()
+    assert row == ("long", "test breakout")
+
+
+def test_does_not_reevaluate_entries_while_position_open(tmp_path):
+    conn = make_conn(tmp_path)
+    seed_complete_history(conn, n_days=10)
+    exchange = FakeExchange(pages=[[]])
+    alerter = MagicMock()
+    signal = Signal(
+        symbol="", timeframe="", direction="long", entry_price=100.0, stop_loss=90.0,
+        take_profit=None, reason="test breakout", timestamp=pd.Timestamp.now(tz="UTC"),
+    )
+    strategy = ScriptedStrategy(signal_to_return=signal, min_lookback=1)
+
+    shadow_poll_once(
+        exchange, conn, alerter, "binance", "BTC/USDT", "1d", strategy,
+        fee=0.0, slippage=0.0, backfill_start_date="2020-01-01T00:00:00Z",
+    )
+    assert alerter.send.call_count == 1
+
+    # a second iteration with the exact same "fresh signal" available should
+    # NOT re-fire — a position is already open, so entry logic is skipped
+    exchange.pages = [[]]
+    shadow_poll_once(
+        exchange, conn, alerter, "binance", "BTC/USDT", "1d", strategy,
+        fee=0.0, slippage=0.0, backfill_start_date="2020-01-01T00:00:00Z",
+    )
+    assert alerter.send.call_count == 1
+    assert conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0] == 1
+
+
+def test_closes_paper_position_on_stop_hit(tmp_path):
+    conn = make_conn(tmp_path)
+    seed_complete_history(conn, n_days=10)  # latest complete bar = yesterday, flat closes=100
+    exchange = FakeExchange(pages=[[]])
+    alerter = MagicMock()
+
+    entry_signal = Signal(
+        symbol="", timeframe="", direction="long", entry_price=100.0, stop_loss=95.0,
+        take_profit=None, reason="pre-existing", timestamp=day_ms(2),
+    )
+    placeholder_strategy = ScriptedStrategy(signal_to_return=None, min_lookback=1)
+    position = engine_open_position(
+        entry_signal, size=1.0, fee=0.0, slippage=0.0, owner=placeholder_strategy
+    )
+    open_paper_position(conn, "binance", "BTC/USDT", "1d", position)
+
+    # overwrite yesterday's (already-complete) candle so its low breaches the stop
+    upsert_candles(conn, "binance", "BTC/USDT", "1d", [[day_ms(1), 100.0, 100.5, 90.0, 92.0, 1.0]])
+
+    strategy = ScriptedStrategy(signal_to_return=None, min_lookback=1)
+    shadow_poll_once(
+        exchange, conn, alerter, "binance", "BTC/USDT", "1d", strategy,
+        fee=0.0, slippage=0.0, backfill_start_date="2020-01-01T00:00:00Z",
+    )
+
+    assert get_open_paper_position(conn, "binance", "BTC/USDT", "1d") is None
+    trade_row = conn.execute(
+        "SELECT direction, exit_price, exit_reason FROM paper_trades"
+    ).fetchone()
+    assert trade_row == ("long", 95.0, "stop")
+    alerter.send.assert_called_once()
+    assert "POSITION_CLOSED" in alerter.send.call_args[0][0]
+
+
+def test_end_to_end_with_real_production_strategy(tmp_path):
+    """Not a strategy-correctness test (that's what backtests are for) —
+    this exists to catch integration bugs (argument/attribute mismatches
+    between the shadow runner and real Strategy objects) that a stubbed
+    ScriptedStrategy can't reveal, using the actual deployed config."""
+    import main as main_module
+    from bot.config import load_config
+
+    conn = make_conn(tmp_path)
+    config = load_config()
+    strategy = main_module._build_strategy("regime_switched", config["strategy"])
+
+    # a steady sustained uptrend both breaks the donchian entry channel and
+    # builds up ADX enough to read as "trending" by the end of the series
+    n_days = 90
+    candles = [
+        [day_ms(d), 30000.0 + (n_days - d) * 50.0, 30000.0 + (n_days - d) * 50.0 + 20,
+         30000.0 + (n_days - d) * 50.0 - 20, 30000.0 + (n_days - d) * 50.0, 1.0]
+        for d in range(n_days, 0, -1)
+    ]
+    upsert_candles(conn, "binance", "BTC/USDT", "1d", candles)
+
+    exchange = FakeExchange(pages=[[]])
+    alerter = MagicMock()
+
+    shadow_poll_once(
+        exchange, conn, alerter, "binance", "BTC/USDT", "1d", strategy,
+        fee=0.001, slippage=0.0005, backfill_start_date="2020-01-01T00:00:00Z",
+    )
+
+    position = get_open_paper_position(conn, "binance", "BTC/USDT", "1d")
+    assert position is not None
+    assert position["direction"] == "long"
+    alerter.send.assert_called_once()
+    assert "SIGNAL_FIRED" in alerter.send.call_args[0][0]
+
+
+def test_drop_incomplete_bar_keeps_bars_whose_period_has_ended():
+    close = pd.Series([100.0, 101.0, 102.0])
+    df = pd.DataFrame(
+        {"open": close, "high": close + 0.5, "low": close - 0.5, "close": close, "volume": 1.0},
+        index=[
+            pd.Timestamp.now(tz="UTC").normalize() - pd.Timedelta(days=3),
+            pd.Timestamp.now(tz="UTC").normalize() - pd.Timedelta(days=2),
+            pd.Timestamp.now(tz="UTC").normalize() - pd.Timedelta(days=1),
+        ],
+    )
+    result = _drop_incomplete_bar(df, "1d")
+    assert len(result) == 3  # all three days have fully ended
+
+
+def test_drop_incomplete_bar_drops_bar_still_in_progress():
+    close = pd.Series([100.0, 101.0])
+    df = pd.DataFrame(
+        {"open": close, "high": close + 0.5, "low": close - 0.5, "close": close, "volume": 1.0},
+        index=[
+            pd.Timestamp.now(tz="UTC").normalize() - pd.Timedelta(days=1),
+            pd.Timestamp.now(tz="UTC").normalize(),  # today — still forming
+        ],
+    )
+    result = _drop_incomplete_bar(df, "1d")
+    assert len(result) == 1
+    assert result.index[-1] == df.index[0]

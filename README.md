@@ -40,7 +40,7 @@ Runs forever, fetching the latest candle every `poll.interval_seconds` (see `con
 python -m pytest tests/ -v
 ```
 
-## Phase 2 — Strategy + Backtest (current)
+## Phase 2 — Strategy + Backtest
 
 A pluggable `Strategy` interface (`bot/strategy/base.py`) plus:
 
@@ -120,15 +120,69 @@ correct risk-based position sizing. This isn't a bug, it's what trading that oft
 edge actually does to an account — remember to `backfill --timeframe 4h`/`1d` before backtesting
 on them.
 
+## Phase 3.5 — Cross-Asset Validation
+
+BTC has only one historical price path (~6-7 years) — repeated backtests against it, and public
+studies that draw on the same history, aren't independent confirmation of anything (spec Section
+8). Before shadow-running, the exact fixed `donchian` rule set from Phase 2
+(`channel_period=20, exit_channel_period=55`, no per-asset tuning) was re-run on ETH/USDT and
+SOL/USDT, same train (2020-2023) / test (2024+) split as BTC. Results logged in
+`btc-usd-bot-spec.md` Section 8 and `notes/cross_asset_results.md`.
+
+**Verdict: mixed.** ETH held up out-of-sample (PF 2.21, beat a nearly-flat buy-and-hold). BTC was
+roughly breakeven (PF 0.91). SOL clearly failed (PF 0.30). Two of three assets clear the Phase 4
+acceptance bar out-of-sample, one doesn't — evidence of a weak, asset-dependent mechanism, not a
+robust cross-asset edge and not purely a BTC-2020-23 artifact either. Worth shadow-testing at
+alert-only risk, not worth trusting with capital yet.
+
+Also per the pilot findings: `rsi_bb` produced too few trades (2-5 over 4 years) to distinguish a
+real edge from noise even when correctly gated, and didn't beat `donchian` run alone. It's been
+removed from the default active path — `regime_switched`'s "ranging" sub-strategy now defaults to
+`flat` (stay in cash, no active mean-reversion) rather than `rsi_bb`, which remains available via
+`strategy.regime_switched.ranging_strategy: rsi_bb` / `--ranging-strategy rsi_bb` for future
+experimentation.
+
+## Phase 3 — Alerting + Phase 4 — Shadow Run (current)
+
+```
+python main.py shadow
+```
+
+Runs the finalized strategy (`regime_switched`: `donchian` while trending, flat while ranging,
+per Phase 3.5 above) live against real Binance data, forever, on `poll.interval_seconds`. Paper
+trading only — no orders are placed anywhere, no Quidax involved at all at this stage. Each
+iteration:
+
+1. Refreshes candles (resumable — survives restarts/downtime without leaving a gap).
+2. Drops the still-forming candle before evaluating anything — signals/exits only ever act on a
+   fully completed bar, so live behavior can't diverge from what the backtest modeled by reacting
+   to a candle that's still changing intraday.
+3. Manages any open paper position (trailing stop, then checks for a stop/target hit) or looks for
+   a new entry if flat — reusing `bot/backtest/engine.py`'s `open_position`/`check_exit`/
+   `close_position` directly rather than a separate implementation, so live and backtested
+   exit/pnl math can't silently drift apart.
+4. Sends a Telegram alert on every signal fired and every position closed (entry/stop/target/
+   reason, or exit price/pnl%/reason), a daily summary (open position, trades today/all-time,
+   cumulative pnl%), and a heartbeat once per `alerting.heartbeat_interval_seconds` (default daily)
+   so a dead process doesn't fail silently (spec Section 9). Messages are structured `key=value`
+   lines, not free text, in case they need parsing later.
+
+All signals, paper trades, and the currently-open paper position are logged to SQLite
+(`signals`/`paper_trades`/`paper_position` tables) for later review — per spec Section 11.
+
+If `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` aren't set in `.env`, alerts are logged at WARNING and
+dropped rather than sent — the shadow run still works (paper trades still get tracked in SQLite),
+you just won't get notified until those are set.
+
 ## Deployment
 
 Mirrors the build/push/SSH-deploy pattern used in this account's other VPS projects:
 
 - `.github/workflows/deploy.yml` builds the Docker image, pushes it to Docker Hub, then SSHes into the VPS to `docker compose pull && up -d` at `/opt/btc-trade-bot`.
-- `docker-compose.yml` runs the bot as a single `unless-stopped` service (`python main.py poll`), with named volumes for `data/` (SQLite) and `logs/`. No Traefik routing — this process has no web port.
+- `docker-compose.yml` runs the bot as a single `unless-stopped` service (`python main.py shadow`), with named volumes for `data/` (SQLite) and `logs/`. No Traefik routing — this process has no web port.
 - Required GitHub Actions secrets: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`, `SSH_HOST`, `SSH_USER`, `SSH_PRIVATE_KEY`.
-- Phase 1 needs no runtime secrets, so `/opt/btc-trade-bot/.env` on the VPS can start empty — later phases (Telegram, Quidax) will add keys there (see `.env.example`).
-- Historical backfill is a one-off, not the long-running `poll` command — run it manually against the deployed container, e.g.:
+- `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` go in `/opt/btc-trade-bot/.env` on the VPS (see `.env.example`) — not committed, not baked into the image.
+- Historical backfill is a one-off, not the long-running `shadow` command — run it manually against the deployed container, e.g.:
   ```
-  docker compose run --rm trade-bot python main.py backfill --symbol BTC/USDT --timeframe 1h --start 2020-01-01T00:00:00Z
+  docker compose run --rm trade-bot python main.py backfill --symbol BTC/USDT --timeframe 1d --start 2020-01-01T00:00:00Z
   ```
