@@ -19,6 +19,8 @@ python main.py backfill --symbol BTC/USDT --timeframe 1h --start 2020-01-01T00:0
 ```
 
 Safe to re-run — resumes from the latest stored candle instead of re-fetching from scratch.
+Pass `--no-resume` to force fetching from `--start` regardless of what's already stored (e.g. if
+`poll` has already seeded a few recent rows for this symbol/timeframe and you now want full history).
 
 ### Poll for live candles
 

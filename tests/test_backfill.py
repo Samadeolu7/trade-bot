@@ -94,6 +94,28 @@ def test_backfill_resumes_from_latest_stored_candle():
     assert exchange.calls == [START + 3 * HOUR_MS]
 
 
+def test_backfill_no_resume_ignores_stored_candles():
+    conn = make_conn()
+    from bot.storage.db import upsert_candles
+
+    # simulate `poll` having already seeded a recent candle far ahead of START
+    upsert_candles(
+        conn, "binance", "BTC/USDT", "1h", [candle(START + 1000 * HOUR_MS)]
+    )
+
+    page = [candle(START + i * HOUR_MS) for i in range(3)]  # short page (< limit) -> stop
+    exchange = FakeExchange([page])
+
+    total = backfill_candles(
+        exchange, conn, "binance", "BTC/USDT", "1h", "2020-01-01T00:00:00Z",
+        resume=False, limit=5,
+    )
+
+    assert total == 3
+    # should have asked for candles from START, not resumed past the seeded row
+    assert exchange.calls == [START]
+
+
 def test_backfill_returns_zero_when_no_data():
     conn = make_conn()
     exchange = FakeExchange([])

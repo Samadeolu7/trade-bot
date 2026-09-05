@@ -21,6 +21,11 @@ def main() -> None:
     backfill_parser.add_argument("--symbol", default=None)
     backfill_parser.add_argument("--timeframe", required=True)
     backfill_parser.add_argument("--start", default=None, help="ISO8601, e.g. 2020-01-01T00:00:00Z")
+    backfill_parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Ignore any already-stored candles and fetch from --start regardless",
+    )
 
     poll_parser = subparsers.add_parser(
         "poll", help="Poll for the latest candle on a fixed interval"
@@ -42,7 +47,8 @@ def main() -> None:
     if args.command == "backfill":
         start_date = args.start or config["backfill"]["start_date"]
         total = backfill_candles(
-            exchange, conn, exchange_id, symbol, args.timeframe, start_date
+            exchange, conn, exchange_id, symbol, args.timeframe, start_date,
+            resume=not args.no_resume,
         )
         logger.info("backfill complete: %d candles stored for %s %s", total, symbol, args.timeframe)
 
