@@ -14,6 +14,7 @@ from bot.logging_setup import configure_logging
 from bot.storage.db import connect, query_candles_df
 from bot.strategy.donchian import DonchianBreakoutStrategy
 from bot.strategy.ema_cross import EmaCrossStrategy
+from bot.strategy.flat import FlatStrategy
 from bot.strategy.regime import RegimeFilter, Sma200RegimeFilter
 from bot.strategy.regime_switch import RegimeSwitchedStrategy
 from bot.strategy.rsi_bb import RsiBollingerStrategy
@@ -28,6 +29,12 @@ def _build_trend_strategy(name: str, strategy_config: dict) -> Strategy:
     if name == "donchian":
         return DonchianBreakoutStrategy(strategy_config.get("donchian", {}))
     return EmaCrossStrategy(strategy_config.get("ema_cross", {}))
+
+
+def _build_ranging_strategy(name: str, strategy_config: dict) -> Strategy:
+    if name == "rsi_bb":
+        return RsiBollingerStrategy(strategy_config.get("rsi_bb", {}))
+    return FlatStrategy()
 
 
 def _build_regime_filter(strategy_config: dict):
@@ -97,15 +104,19 @@ def _build_strategy(name: str, strategy_config: dict) -> Strategy:
     if name == "donchian":
         return DonchianBreakoutStrategy(strategy_config.get("donchian", {}))
 
-    # regime_switched: trend sub-strategy and regime-filter type are
+    # regime_switched: trend/ranging sub-strategies and regime-filter type are
     # config-driven (spec Section 1), not separate --strategy choices, so
     # e.g. swapping ADX for SMA(200) or ema_cross for donchian is a
-    # config/config.yaml edit, not a code change.
-    rsi_strategy = RsiBollingerStrategy(strategy_config.get("rsi_bb", {}))
-    trend_name = strategy_config.get("regime_switched", {}).get("trend_strategy", "ema_cross")
+    # config/config.yaml edit, not a code change. ranging_strategy defaults to
+    # "flat" (spec Section 8 pilot findings: rsi_bb didn't demonstrate a real
+    # edge and is opt-in only) rather than "rsi_bb".
+    regime_switched_config = strategy_config.get("regime_switched", {})
+    trend_name = regime_switched_config.get("trend_strategy", "ema_cross")
+    ranging_name = regime_switched_config.get("ranging_strategy", "flat")
     trending_strategy = _build_trend_strategy(trend_name, strategy_config)
+    ranging_strategy = _build_ranging_strategy(ranging_name, strategy_config)
     regime_filter = _build_regime_filter(strategy_config)
-    return RegimeSwitchedStrategy(trending_strategy, rsi_strategy, regime_filter)
+    return RegimeSwitchedStrategy(trending_strategy, ranging_strategy, regime_filter)
 
 
 def main() -> None:
@@ -144,6 +155,12 @@ def main() -> None:
         choices=["ema_cross", "donchian"],
         default=None,
         help="only for --strategy regime_switched: overrides strategy.regime_switched.trend_strategy",
+    )
+    backtest_parser.add_argument(
+        "--ranging-strategy",
+        choices=["flat", "rsi_bb"],
+        default=None,
+        help="only for --strategy regime_switched: overrides strategy.regime_switched.ranging_strategy",
     )
     backtest_parser.add_argument(
         "--regime-type",
@@ -205,6 +222,13 @@ def main() -> None:
         "for every combination in the sweep (use --param if you want to sweep this too)",
     )
     sweep_parser.add_argument(
+        "--ranging-strategy",
+        choices=["flat", "rsi_bb"],
+        default=None,
+        help="only for --strategy regime_switched: overrides strategy.regime_switched.ranging_strategy "
+        "for every combination in the sweep",
+    )
+    sweep_parser.add_argument(
         "--regime-type",
         choices=["adx", "sma200"],
         default=None,
@@ -262,6 +286,9 @@ def main() -> None:
         strategy_config = _with_override(
             strategy_config, "regime_switched", "trend_strategy", args.trend_strategy
         )
+        strategy_config = _with_override(
+            strategy_config, "regime_switched", "ranging_strategy", args.ranging_strategy
+        )
         strategy_config = _with_override(strategy_config, "regime", "type", args.regime_type)
         strategy_config = _with_override(
             strategy_config, "donchian", "exit_channel_period", args.exit_channel_period
@@ -301,6 +328,9 @@ def main() -> None:
         backtest_config = config.get("backtest", {})
         base_strategy_config = _with_override(
             base_strategy_config, "regime_switched", "trend_strategy", args.trend_strategy
+        )
+        base_strategy_config = _with_override(
+            base_strategy_config, "regime_switched", "ranging_strategy", args.ranging_strategy
         )
         base_strategy_config = _with_override(base_strategy_config, "regime", "type", args.regime_type)
 

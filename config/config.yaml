@@ -6,8 +6,8 @@ backfill:
   start_date: "2020-01-01T00:00:00Z"
 
 poll:
-  timeframe: "1h"
-  interval_seconds: 60
+  timeframe: "1d"          # matches the timeframe donchian was actually validated on (spec Section 8) — 1h/4h overtrade badly
+  interval_seconds: 300    # daily candles don't need minute-level polling; frequent enough to catch a new one promptly
 
 storage:
   db_path: "data/trades.db"
@@ -29,7 +29,8 @@ strategy:
     adx_period: 14
     adx_threshold: 20  # looser than regime.adx_threshold — this is secondary confirmation, not the primary call
   regime_switched:
-    trend_strategy: ema_cross  # ema_cross | donchian
+    trend_strategy: donchian  # ema_cross | donchian — donchian is the only one with a validated (if still unconfirmed) edge so far
+    ranging_strategy: flat    # flat | rsi_bb — flat is the default per spec Section 8 pilot findings; rsi_bb remains opt-in
   ema_cross:
     fast_period: 20
     slow_period: 50

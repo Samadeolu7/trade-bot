@@ -42,7 +42,12 @@ def position_size(equity: float, risk_pct: float, entry_price: float, stop_loss:
     return min(risk_based_size, max_affordable_size)
 
 
-def _open_position(signal: Signal, size: float, fee: float, slippage: float, owner: Strategy) -> dict:
+def open_position(signal: Signal, size: float, fee: float, slippage: float, owner: Strategy) -> dict:
+    """Public (not backtest-private): the shadow runner (bot/shadow/) reuses
+    this, check_exit, and close_position directly, so live position/exit/pnl
+    math is guaranteed identical to what the backtest models — the entire
+    point of comparing shadow-run behavior against backtest expectations
+    (spec Phase 4) falls apart if the two paths can silently drift apart."""
     if signal.direction == "long":
         effective_entry = signal.entry_price * (1 + slippage)
     else:
@@ -60,7 +65,7 @@ def _open_position(signal: Signal, size: float, fee: float, slippage: float, own
     }
 
 
-def _check_exit(position: dict, bar: pd.Series) -> tuple[float | None, str | None]:
+def check_exit(position: dict, bar: pd.Series) -> tuple[float | None, str | None]:
     """Uses the bar's high/low for intrabar stop/target hits. If both could
     have hit within the same bar, assumes the stop hit first — the more
     conservative (less favorable) assumption, since we can't know the true
@@ -81,7 +86,7 @@ def _check_exit(position: dict, bar: pd.Series) -> tuple[float | None, str | Non
     return None, None
 
 
-def _close_position(
+def close_position(
     position: dict, exit_price: float, fee: float, slippage: float
 ) -> tuple[float, float]:
     """Returns (net_pnl, effective_exit_price)."""
@@ -144,9 +149,9 @@ def run_backtest(
             position["stop"] = position["strategy"].trail_stop(
                 window, position["direction"], position["stop"]
             )
-            exit_price, exit_reason = _check_exit(position, bar)
+            exit_price, exit_reason = check_exit(position, bar)
             if exit_price is not None:
-                pnl, effective_exit = _close_position(position, exit_price, fee, slippage)
+                pnl, effective_exit = close_position(position, exit_price, fee, slippage)
                 equity += pnl
                 trades.append(
                     Trade(
@@ -180,7 +185,7 @@ def run_backtest(
                 size = position_size(equity, risk_pct, signal.entry_price, signal.stop_loss)
                 if size > 0:
                     owner = sig_row["strategy"] if has_owner_column else strategy
-                    position = _open_position(signal, size, fee, slippage, owner)
+                    position = open_position(signal, size, fee, slippage, owner)
 
         unrealized = _unrealized_pnl(position, bar) if position is not None else 0.0
         times.append(bar.name)
@@ -188,7 +193,7 @@ def run_backtest(
 
     if position is not None:
         last_bar = df.iloc[-1]
-        pnl, effective_exit = _close_position(position, last_bar["close"], fee, slippage)
+        pnl, effective_exit = close_position(position, last_bar["close"], fee, slippage)
         equity += pnl
         trades.append(
             Trade(
