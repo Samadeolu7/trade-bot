@@ -131,7 +131,21 @@ Unlike traditional markets, perpetual futures funding rates are public and often
 3. **Phase 3 — Alerting**: Telegram integration, paper-mode signal alerts only (no execution).
 4. **Phase 4 — Shadow run**: let it run live on the VPS in paper/alert-only mode for a few weeks, compare real-time behavior against backtest expectations before trusting it.
 5. **Phase 5 — Execution (optional)**: build the Quidax REST client, open a Quidax account + API key (trading scope only), manual-confirm mode first, full auto only after Phase 4 has proven out and the circuit-breaker/risk controls are tested.
+6. **Phase 6 — Optional ML confidence filter**: only after Phase 4/5 have a proven live-paper track record. See Section 14.
 
-## 14. Disclaimer
+## 14. Optional Enhancement — ML Confidence Filter (Phase 6)
+
+Not a prerequisite, and not a promise of higher profitability — this is a filter on top of the existing rule-based strategies, not a replacement or a new alpha source. Only build this after Phase 4/5 have a proven live-paper track record; adding it earlier just makes debugging harder.
+
+**What it does:** instead of generating new trade ideas, it scores each signal the rule-based strategies already produce and lets the bot suppress low-confidence ones — fewer false positives/whipsaws, not new opportunities.
+
+- **Model**: LightGBM or XGBoost — free, CPU-only, trains and runs fine on the existing VPS, no GPU needed.
+- **Labels**: for each historical instance where strategy (a)/(b)/(c) fired, label whether price actually followed through in the next N candles (binary yes/no, N tuned per strategy/timeframe).
+- **Features**: the indicator values and regime state at signal time (EMA distance, ADX, RSI, ATR, volume relative to average, Binance funding rate), not raw price — the model should learn "when does this rule tend to work," not try to predict price directly.
+- **Output**: a follow-through probability. Only forward the alert (and, later, execute) if it clears a threshold (e.g. >60%) — tune the threshold on validation data, not by eyeballing it.
+- **Free extra input, no ML needed**: the Crypto Fear & Greed Index (alternative.me, free public API) as another regime feature alongside funding rate — worth adding regardless of whether the ML filter ships.
+
+**Validation requirement (non-negotiable):** backtest the filtered signals against the unfiltered rule-only baseline, out-of-sample, across the same multiple regimes from Section 8. A small model trained on limited BTC history overfits easily — if the filtered version doesn't clearly beat the baseline out-of-sample, don't ship it just because it looked better in-sample.
+## 15. Disclaimer
 
 This spec is a technical build plan, not financial advice. No strategy here is guaranteed to be profitable — crypto markets are volatile and regimes change. Backtest thoroughly, paper-trade before risking capital, and only trade with money you can afford to lose.
