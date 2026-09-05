@@ -95,6 +95,20 @@ strategies actually beat it on raw return — their edge was a better risk profi
 drawdown, less time exposed), not higher absolute profit. A backtest result only means something
 next to that baseline, not in isolation.
 
+### Sweep a parameter grid
+
+```
+python main.py sweep --strategy regime_switched --timeframe 1d --start 2023-01-01T00:00:00Z \
+  --trend-strategy donchian --regime-type adx \
+  --param rsi_bb.rsi_oversold=20,25,30 --param rsi_bb.stop_band_mult=0.5,0.75,1.0 \
+  --rank-by profit_factor
+```
+
+Grid-searches the cartesian product of every `--param section.key=v1,v2,...` (repeatable), running
+one backtest per combination and printing a table ranked by `--rank-by` (default `profit_factor`).
+Beats typing out a `docker compose run` per combination by hand — any `strategy.*` parameter in
+`config/config.yaml` can be swept this way, not just the ones with dedicated `backtest` flags.
+
 Per spec Section 8, don't judge a strategy from one date range — rerun `--start`/`--end` across a
 few distinct regimes (e.g. the 2020-21 bull run, the 2022 bear market, a choppy stretch) before
 trusting a result.

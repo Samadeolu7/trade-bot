@@ -1,4 +1,5 @@
 import argparse
+import itertools
 import logging
 
 import pandas as pd
@@ -43,6 +44,49 @@ def _with_override(strategy_config: dict, section: str, key: str, value) -> dict
     if value is None:
         return strategy_config
     return {**strategy_config, section: {**strategy_config.get(section, {}), key: value}}
+
+
+def _coerce_param_value(raw: str):
+    try:
+        f = float(raw)
+    except ValueError:
+        return raw
+    return int(f) if f.is_integer() and "." not in raw and "e" not in raw.lower() else f
+
+
+def parse_param_arg(arg: str) -> tuple[str, str, list]:
+    """Parses a `--param section.key=v1,v2,...` sweep argument into
+    (section, key, [coerced values]). Values are coerced to int/float where
+    possible, else kept as strings (e.g. for exit_method=channel,atr)."""
+    path, raw_values = arg.split("=", 1)
+    section, key = path.split(".", 1)
+    values = [_coerce_param_value(v) for v in raw_values.split(",")]
+    return section, key, values
+
+
+def _run_backtest_once(
+    df: pd.DataFrame, strategy_name: str, strategy_config: dict, backtest_config: dict, timeframe: str
+) -> dict:
+    strategy = _build_strategy(strategy_name, strategy_config)
+    result = run_backtest(
+        df,
+        strategy,
+        fee=backtest_config.get("fee", 0.001),
+        slippage=backtest_config.get("slippage", 0.0005),
+        initial_capital=backtest_config.get("initial_capital", 10_000.0),
+        risk_pct=backtest_config.get("risk_pct", 0.01),
+    )
+    summary = summarize(
+        result.trades,
+        result.equity_curve,
+        backtest_config.get("initial_capital", 10_000.0),
+        timeframe,
+        close=df["close"],
+    )
+    by_strategy = breakdown_by_strategy(result.trades)
+    if len(by_strategy) > 1:
+        summary["by_strategy"] = by_strategy
+    return summary
 
 
 def _build_strategy(name: str, strategy_config: dict) -> Strategy:
@@ -145,6 +189,43 @@ def main() -> None:
         "--stop-band-mult", type=float, default=None, help="overrides strategy.rsi_bb.stop_band_mult"
     )
 
+    sweep_parser = subparsers.add_parser(
+        "sweep", help="Grid-search strategy parameters, print a ranked comparison table"
+    )
+    sweep_parser.add_argument("--strategy", choices=STRATEGY_CHOICES, required=True)
+    sweep_parser.add_argument("--symbol", default=None)
+    sweep_parser.add_argument("--timeframe", required=True)
+    sweep_parser.add_argument("--start", default=None, help="ISO8601, restricts the backtest window")
+    sweep_parser.add_argument("--end", default=None, help="ISO8601, restricts the backtest window")
+    sweep_parser.add_argument(
+        "--trend-strategy",
+        choices=["ema_cross", "donchian"],
+        default=None,
+        help="only for --strategy regime_switched: overrides strategy.regime_switched.trend_strategy "
+        "for every combination in the sweep (use --param if you want to sweep this too)",
+    )
+    sweep_parser.add_argument(
+        "--regime-type",
+        choices=["adx", "sma200"],
+        default=None,
+        help="only for --strategy regime_switched: overrides strategy.regime.type for every "
+        "combination in the sweep",
+    )
+    sweep_parser.add_argument(
+        "--param",
+        action="append",
+        default=[],
+        metavar="SECTION.KEY=V1,V2,...",
+        help="repeatable; grid-searches the cartesian product of every --param's value list, e.g. "
+        "--param rsi_bb.rsi_oversold=20,25,30 --param rsi_bb.stop_band_mult=0.5,0.75,1.0",
+    )
+    sweep_parser.add_argument(
+        "--rank-by",
+        choices=["profit_factor", "total_return_pct", "sharpe_ratio", "win_rate_pct"],
+        default="profit_factor",
+        help="sort the printed table by this metric, best first",
+    )
+
     args = parser.parse_args()
 
     config = load_config()
@@ -201,32 +282,53 @@ def main() -> None:
             strategy_config, "rsi_bb", "stop_band_mult", args.stop_band_mult
         )
 
-        strategy = _build_strategy(args.strategy, strategy_config)
-
-        result = run_backtest(
-            df,
-            strategy,
-            fee=backtest_config.get("fee", 0.001),
-            slippage=backtest_config.get("slippage", 0.0005),
-            initial_capital=backtest_config.get("initial_capital", 10_000.0),
-            risk_pct=backtest_config.get("risk_pct", 0.01),
-        )
-        summary = summarize(
-            result.trades,
-            result.equity_curve,
-            backtest_config.get("initial_capital", 10_000.0),
-            args.timeframe,
-            close=df["close"],
-        )
-        by_strategy = breakdown_by_strategy(result.trades)
-        if len(by_strategy) > 1:
-            summary["by_strategy"] = by_strategy
+        summary = _run_backtest_once(df, args.strategy, strategy_config, backtest_config, args.timeframe)
 
         logger.info(
             "backtest complete: %s %s %s over %d candles -> %s",
             args.strategy, symbol, args.timeframe, len(df), summary,
         )
         print(summary)
+
+    elif args.command == "sweep":
+        df = query_candles_df(conn, exchange_id, symbol, args.timeframe)
+        if args.start:
+            df = df[df.index >= pd.Timestamp(args.start)]
+        if args.end:
+            df = df[df.index <= pd.Timestamp(args.end)]
+
+        base_strategy_config = config.get("strategy", {})
+        backtest_config = config.get("backtest", {})
+        base_strategy_config = _with_override(
+            base_strategy_config, "regime_switched", "trend_strategy", args.trend_strategy
+        )
+        base_strategy_config = _with_override(base_strategy_config, "regime", "type", args.regime_type)
+
+        grid = [parse_param_arg(p) for p in args.param]
+        sections_keys = [(section, key) for section, key, _ in grid]
+        value_lists = [values for _, _, values in grid]
+        combos = list(itertools.product(*value_lists)) if grid else [()]
+
+        rows = []
+        for combo in combos:
+            strategy_config = base_strategy_config
+            for (section, key), value in zip(sections_keys, combo):
+                strategy_config = _with_override(strategy_config, section, key, value)
+
+            summary = _run_backtest_once(
+                df, args.strategy, strategy_config, backtest_config, args.timeframe
+            )
+            params_label = ", ".join(f"{s}.{k}={v}" for (s, k), v in zip(sections_keys, combo))
+            rows.append((params_label or "(defaults)", summary))
+
+        rows.sort(key=lambda row: row[1].get(args.rank_by, 0.0), reverse=True)
+
+        logger.info(
+            "sweep complete: %s %s %s over %d candles, %d combo(s) ranked by %s",
+            args.strategy, symbol, args.timeframe, len(df), len(rows), args.rank_by,
+        )
+        for params_label, summary in rows:
+            print(f"{params_label} -> {summary}")
 
 
 if __name__ == "__main__":
