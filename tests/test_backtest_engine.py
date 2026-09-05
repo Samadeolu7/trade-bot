@@ -160,3 +160,93 @@ def test_no_signals_leaves_equity_unchanged():
     assert result.trades == []
     assert result.final_equity == 10_000.0
     assert (result.equity_curve == 10_000.0).all()
+
+
+class TrailStopSpy(Strategy):
+    """Records every trail_stop call and always returns the same (harmless)
+    stop, so tests can prove *which* strategy object the engine delegated to."""
+
+    name = "trail_stop_spy"
+
+    def __init__(self, stop_to_return: float):
+        super().__init__({})
+        self.min_lookback = 1
+        self.stop_to_return = stop_to_return
+        self.calls = 0
+
+    def generate_signal(self, df):
+        return None
+
+    def trail_stop(self, df, direction, current_stop):
+        self.calls += 1
+        return self.stop_to_return
+
+
+class OwnerTaggingStrategy(Strategy):
+    """A composite-like top-level strategy: fires one signal tagged with an
+    `owner` sub-strategy via the `strategy` column, and asserts its own
+    trail_stop is never called — only the tagged owner's should be."""
+
+    name = "owner_tagging"
+
+    def __init__(self, signal: Signal, owner: Strategy):
+        super().__init__({})
+        self.min_lookback = 1
+        self.signal = signal
+        self.owner = owner
+
+    def generate_signal(self, df):
+        return None
+
+    def entry_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        n = len(df)
+        direction = [None] * n
+        entry_price = [float("nan")] * n
+        stop_loss = [float("nan")] * n
+        take_profit = [float("nan")] * n
+        reason = [None] * n
+        owner_col = [None] * n
+
+        idx = df.index.get_loc(self.signal.timestamp)
+        direction[idx] = self.signal.direction
+        entry_price[idx] = self.signal.entry_price
+        stop_loss[idx] = self.signal.stop_loss
+        take_profit[idx] = self.signal.take_profit
+        reason[idx] = self.signal.reason
+        owner_col[idx] = self.owner
+
+        return pd.DataFrame(
+            {
+                "direction": direction,
+                "entry_price": entry_price,
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+                "reason": reason,
+                "strategy": owner_col,
+            },
+            index=df.index,
+        )
+
+    def trail_stop(self, df, direction, current_stop):
+        raise AssertionError(
+            "the top-level strategy's trail_stop must not be called when a "
+            "signal row tags an owner — the engine should delegate to it instead"
+        )
+
+
+def test_engine_delegates_trail_stop_to_tagged_owner():
+    df = make_df(
+        [
+            {"open": 100, "high": 100.5, "low": 99.5, "close": 100},  # 0: filler
+            {"open": 100, "high": 100.5, "low": 99.5, "close": 100},  # 1: entry bar
+            {"open": 105, "high": 105.5, "low": 104.5, "close": 105},  # 2: open
+            {"open": 106, "high": 106.5, "low": 105.5, "close": 106},  # 3: open
+        ]
+    )
+    owner = TrailStopSpy(stop_to_return=90.0)  # same as entry stop -> never triggers exit
+    top_level = OwnerTaggingStrategy(signal=long_signal(stop=90.0, tp=None), owner=owner)
+
+    run_backtest(df, top_level, fee=0.0, slippage=0.0, risk_pct=0.01)
+
+    # bars 2 and 3 both have an open position -> trail_stop delegated twice
+    assert owner.calls == 2

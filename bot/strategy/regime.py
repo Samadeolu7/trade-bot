@@ -1,5 +1,6 @@
 from typing import Literal
 
+import numpy as np
 import pandas as pd
 
 from bot.indicators.indicators import adx
@@ -27,3 +28,11 @@ class RegimeFilter:
         if pd.isna(latest_adx):
             return None
         return "trending" if latest_adx >= self.adx_threshold else "ranging"
+
+    def regime_series(self, df: pd.DataFrame) -> pd.Series:
+        """Vectorized equivalent of `regime`: ADX computed once over the
+        whole df, giving a regime label per bar (None where ADX hasn't
+        warmed up yet)."""
+        adx_val = adx(df["high"], df["low"], df["close"], period=self.adx_period)["adx"]
+        labels = np.where(adx_val >= self.adx_threshold, "trending", "ranging")
+        return pd.Series(np.where(adx_val.isna(), None, labels), index=df.index)

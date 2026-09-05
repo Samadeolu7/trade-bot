@@ -68,3 +68,37 @@ def test_no_signal_on_flat_market():
     strategy = build_strategy()
     df = make_df([100.0] * 60)
     assert strategy.generate_signal(df) is None
+
+
+def test_entry_signals_matches_generate_signal_long():
+    strategy = build_strategy()
+    df = make_df([100.0] * 59 + [80.0])
+
+    signal = strategy.generate_signal(df)
+    row = strategy.entry_signals(df).iloc[-1]
+
+    assert row["direction"] == signal.direction == "long"
+    assert row["entry_price"] == signal.entry_price
+    assert row["stop_loss"] == signal.stop_loss
+    assert row["take_profit"] == signal.take_profit
+    assert row["reason"] == signal.reason
+
+
+def test_entry_signals_matches_generate_signal_short():
+    strategy = build_strategy()
+    df = make_df([100.0] * 59 + [120.0])
+
+    signal = strategy.generate_signal(df)
+    row = strategy.entry_signals(df).iloc[-1]
+
+    assert row["direction"] == signal.direction == "short"
+    assert row["entry_price"] == signal.entry_price
+    assert row["stop_loss"] == signal.stop_loss
+    assert row["take_profit"] == signal.take_profit
+
+
+def test_entry_signals_no_signal_on_flat_market():
+    strategy = build_strategy()
+    df = make_df([100.0] * 60)
+    signals = strategy.entry_signals(df)
+    assert signals["direction"].isna().all()

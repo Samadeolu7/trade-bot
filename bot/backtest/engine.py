@@ -36,7 +36,7 @@ def position_size(equity: float, risk_pct: float, entry_price: float, stop_loss:
     return (equity * risk_pct) / stop_distance
 
 
-def _open_position(signal: Signal, size: float, fee: float, slippage: float) -> dict:
+def _open_position(signal: Signal, size: float, fee: float, slippage: float, owner: Strategy) -> dict:
     if signal.direction == "long":
         effective_entry = signal.entry_price * (1 + slippage)
     else:
@@ -50,6 +50,7 @@ def _open_position(signal: Signal, size: float, fee: float, slippage: float) -> 
         "stop": signal.stop_loss,
         "take_profit": signal.take_profit,
         "entry_fee": entry_fee,
+        "strategy": owner,
     }
 
 
@@ -107,11 +108,21 @@ def run_backtest(
 ) -> BacktestResult:
     """Bar-by-bar simulation: manages at most one open position at a time,
     sized off the stop-loss distance and closed out on stop/target/end-of-data.
-    Indicators are recomputed each bar over a bounded trailing window
-    (`strategy.min_lookback`), not the full history, so cost stays O(n)."""
+
+    Entry signals are computed once up front via `strategy.entry_signals(df)`
+    (vectorized over the whole series) rather than by re-slicing a trailing
+    window and calling `generate_signal` at every bar — the latter is both
+    O(n * lookback) and, for recursive indicators (EMA, Wilder smoothing),
+    numerically restarts each one's "memory" every window instead of letting
+    it run continuously. Trailing-stop updates still use a bounded window,
+    since they're only needed on the much rarer bars where a position is
+    actually open."""
     lookback = strategy.min_lookback
     if len(df) <= lookback:
         return BacktestResult()
+
+    signals = strategy.entry_signals(df)
+    has_owner_column = "strategy" in signals.columns
 
     equity = initial_capital
     position: dict | None = None
@@ -120,11 +131,13 @@ def run_backtest(
     values: list[float] = []
 
     for i in range(lookback, len(df)):
-        window = df.iloc[max(0, i - lookback + 1) : i + 1]
         bar = df.iloc[i]
 
         if position is not None:
-            position["stop"] = strategy.trail_stop(window, position["direction"], position["stop"])
+            window = df.iloc[max(0, i - lookback + 1) : i + 1]
+            position["stop"] = position["strategy"].trail_stop(
+                window, position["direction"], position["stop"]
+            )
             exit_price, exit_reason = _check_exit(position, bar)
             if exit_price is not None:
                 pnl, effective_exit = _close_position(position, exit_price, fee, slippage)
@@ -144,11 +157,23 @@ def run_backtest(
                 position = None
 
         if position is None:
-            signal = strategy.generate_signal(window)
-            if signal is not None and signal.direction != "flat":
+            sig_row = signals.iloc[i]
+            if pd.notna(sig_row["direction"]):
+                take_profit = sig_row["take_profit"]
+                signal = Signal(
+                    symbol="",
+                    timeframe="",
+                    direction=sig_row["direction"],
+                    entry_price=sig_row["entry_price"],
+                    stop_loss=sig_row["stop_loss"],
+                    take_profit=None if pd.isna(take_profit) else take_profit,
+                    reason=sig_row["reason"] or "",
+                    timestamp=bar.name,
+                )
                 size = position_size(equity, risk_pct, signal.entry_price, signal.stop_loss)
                 if size > 0:
-                    position = _open_position(signal, size, fee, slippage)
+                    owner = sig_row["strategy"] if has_owner_column else strategy
+                    position = _open_position(signal, size, fee, slippage, owner)
 
         unrealized = _unrealized_pnl(position, bar) if position is not None else 0.0
         times.append(bar.name)

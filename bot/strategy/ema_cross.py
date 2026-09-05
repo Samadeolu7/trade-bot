@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 
 from bot.indicators.indicators import atr, ema
@@ -21,13 +22,17 @@ class EmaCrossStrategy(Strategy):
         # (comparing the last two bars) has a valid prior bar too.
         self.min_lookback = max(self.slow_period, self.atr_period) * 3 + 2
 
+    def _indicators(self, df: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
+        fast = ema(df["close"], self.fast_period)
+        slow = ema(df["close"], self.slow_period)
+        atr_val = atr(df["high"], df["low"], df["close"], self.atr_period)
+        return fast, slow, atr_val
+
     def generate_signal(self, df: pd.DataFrame) -> Signal | None:
         if len(df) < self.min_lookback:
             return None
 
-        fast = ema(df["close"], self.fast_period)
-        slow = ema(df["close"], self.slow_period)
-        atr_val = atr(df["high"], df["low"], df["close"], self.atr_period)
+        fast, slow, atr_val = self._indicators(df)
 
         if pd.isna(fast.iloc[-2]) or pd.isna(slow.iloc[-2]) or pd.isna(atr_val.iloc[-1]):
             return None
@@ -62,6 +67,43 @@ class EmaCrossStrategy(Strategy):
                 timestamp=timestamp,
             )
         return None
+
+    def entry_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Vectorized: EMA/ATR computed once over the full df (continuous,
+        not restarted per bar), then crossovers detected across the whole
+        series at once."""
+        fast, slow, atr_val = self._indicators(df)
+        prev_fast = fast.shift(1)
+        prev_slow = slow.shift(1)
+
+        crossed_up = (prev_fast <= prev_slow) & (fast > slow)
+        crossed_down = (prev_fast >= prev_slow) & (fast < slow)
+
+        close = df["close"]
+        direction = np.where(crossed_up, "long", np.where(crossed_down, "short", None))
+        stop_loss = np.where(
+            crossed_up,
+            close - self.atr_mult * atr_val,
+            np.where(crossed_down, close + self.atr_mult * atr_val, np.nan),
+        )
+        reason = np.where(
+            crossed_up,
+            f"EMA{self.fast_period} crossed above EMA{self.slow_period}",
+            np.where(
+                crossed_down, f"EMA{self.fast_period} crossed below EMA{self.slow_period}", None
+            ),
+        )
+
+        return pd.DataFrame(
+            {
+                "direction": direction,
+                "entry_price": np.where(direction != None, close, np.nan),  # noqa: E711
+                "stop_loss": stop_loss,
+                "take_profit": np.nan,
+                "reason": reason,
+            },
+            index=df.index,
+        )
 
     def trail_stop(self, df: pd.DataFrame, direction: Direction, current_stop: float) -> float:
         atr_val = atr(df["high"], df["low"], df["close"], self.atr_period)

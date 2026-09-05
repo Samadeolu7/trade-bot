@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 
 from bot.strategy.base import Direction, Signal, Strategy
@@ -37,3 +38,21 @@ class RegimeSwitchedStrategy(Strategy):
         if self._active is None:
             return current_stop
         return self._active.trail_stop(df, direction, current_stop)
+
+    def entry_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Vectorized: regime, and both sub-strategies' entry signals, are
+        each computed once over the full df, then combined per bar. Adds a
+        `strategy` column naming which sub-strategy owns each signal row, so
+        the backtest engine can delegate that position's trailing-stop calls
+        to the correct sub-strategy even after the regime later flips."""
+        regimes = self.regime_filter.regime_series(df)
+        trending_sig = self.trending.entry_signals(df)
+        ranging_sig = self.ranging.entry_signals(df)
+
+        is_trending = (regimes == "trending").to_numpy()
+        combined = pd.DataFrame(index=df.index)
+        for col in ["direction", "entry_price", "stop_loss", "take_profit", "reason"]:
+            combined[col] = np.where(is_trending, trending_sig[col], ranging_sig[col])
+        combined["strategy"] = np.where(is_trending, self.trending, self.ranging)
+        combined.loc[regimes.isna(), ["direction", "strategy"]] = None
+        return combined

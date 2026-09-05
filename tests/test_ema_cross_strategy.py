@@ -68,6 +68,41 @@ def test_short_signal_on_cross_down():
     assert "crossed below" in signal.reason
 
 
+def test_entry_signals_matches_generate_signal_on_cross_up():
+    strategy = build_strategy()
+    df = make_df([100.0] * 9 + [95.0, 110.0])
+
+    signal = strategy.generate_signal(df)
+    row = strategy.entry_signals(df).iloc[-1]
+
+    assert row["direction"] == signal.direction == "long"
+    assert row["entry_price"] == signal.entry_price
+    assert row["stop_loss"] == signal.stop_loss
+    assert pd.isna(row["take_profit"]) and signal.take_profit is None
+    assert row["reason"] == signal.reason
+
+
+def test_entry_signals_matches_generate_signal_on_cross_down():
+    strategy = build_strategy()
+    df = make_df([100.0] * 9 + [105.0, 90.0])
+
+    signal = strategy.generate_signal(df)
+    row = strategy.entry_signals(df).iloc[-1]
+
+    assert row["direction"] == signal.direction == "short"
+    assert row["entry_price"] == signal.entry_price
+    assert row["stop_loss"] == signal.stop_loss
+
+
+def test_entry_signals_no_signal_once_trend_is_established():
+    strategy = build_strategy()
+    df = make_df([100 + i for i in range(30)])
+    signals = strategy.entry_signals(df)
+    # a fresh cross only ever happens once, early on, while the trend forms;
+    # nothing should fire again once it's well established
+    assert signals["direction"].iloc[-10:].isna().all()
+
+
 def test_no_signal_once_trend_is_established():
     strategy = build_strategy()
     # steady uptrend for long enough that fast/slow have long since settled

@@ -43,3 +43,55 @@ class Strategy(ABC):
         whose exit is itself a trailing stop (e.g. ATR-based) override this;
         the result must only ever move in the position's favor."""
         return current_stop
+
+    def entry_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Vectorized equivalent of generate_signal: for every bar in df,
+        would this strategy open a position there? Returns a frame aligned to
+        df.index with columns direction/entry_price/stop_loss/take_profit/
+        reason (direction is None where nothing fires).
+
+        The backtest engine uses this instead of calling generate_signal once
+        per bar over a re-sliced trailing window — recomputing EMA/RSI/ATR
+        etc. from scratch at every single bar is both O(n * lookback) instead
+        of O(n), and numerically restarts each indicator's "memory" every
+        window instead of letting it run continuously, which biases anything
+        recursive (EMA, Wilder smoothing) versus how it actually behaves live.
+
+        Default implementation: correct but slow — replays generate_signal
+        per bar over a trailing window, identical to the old engine behavior.
+        Strategies should override this with a real vectorized computation;
+        this fallback exists so a Strategy that doesn't bother is still usable
+        (e.g. a test double, or a quick prototype) without the engine caring.
+        """
+        directions: list = []
+        entries: list = []
+        stops: list = []
+        take_profits: list = []
+        reasons: list = []
+
+        for i in range(len(df)):
+            window = df.iloc[max(0, i - self.min_lookback + 1) : i + 1]
+            signal = self.generate_signal(window) if len(window) >= self.min_lookback else None
+            if signal is not None:
+                directions.append(signal.direction)
+                entries.append(signal.entry_price)
+                stops.append(signal.stop_loss)
+                take_profits.append(signal.take_profit)
+                reasons.append(signal.reason)
+            else:
+                directions.append(None)
+                entries.append(float("nan"))
+                stops.append(float("nan"))
+                take_profits.append(float("nan"))
+                reasons.append(None)
+
+        return pd.DataFrame(
+            {
+                "direction": directions,
+                "entry_price": entries,
+                "stop_loss": stops,
+                "take_profit": take_profits,
+                "reason": reasons,
+            },
+            index=df.index,
+        )

@@ -33,3 +33,17 @@ def test_regime_ranging_on_choppy_series():
     rf = RegimeFilter(adx_period=14, adx_threshold=25)
     df = make_df([100 + 5 * np.sin(i * 0.5) for i in range(60)])
     assert rf.regime(df) == "ranging"
+
+
+def test_regime_series_last_value_matches_regime():
+    rf = RegimeFilter(adx_period=14, adx_threshold=25)
+    df = make_df([100 + i for i in range(60)])
+    assert rf.regime_series(df).iloc[-1] == rf.regime(df) == "trending"
+
+
+def test_regime_series_none_at_start_before_adx_warms_up():
+    rf = RegimeFilter(adx_period=14, adx_threshold=25)
+    df = make_df([100 + i for i in range(60)])
+    series = rf.regime_series(df)
+    assert pd.isna(series.iloc[0])
+    assert pd.notna(series.iloc[-1])
