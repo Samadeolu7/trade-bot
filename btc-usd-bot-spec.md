@@ -90,8 +90,6 @@ Long when price closes above the highest high of the prior 20 daily bars, exit w
 **Explicitly not included: naive grid trading.** It's the most heavily marketed "profitable" crypto bot strategy, but the claims behind it are almost entirely exchange marketing rather than reproducible backtests, and its mechanics are structurally built for sideways markets — a strong sustained trend drives price outside the grid and leaves it holding unrealized losing positions, the same failure mode that made the Bollinger mean-reversion strategy above the worst performer in the real test (65.7% win rate, only +10.4% return, 52.7% drawdown). If it's added later, it needs a hard "pause during confirmed trend" kill-switch tied to the same regime filter as everything else, not a standalone always-on strategy.
 
 **Evidence note for Claude Code:** strategies (a) and (e) above were validated against an independent, reproducible backtest (CoinQuant, BTCUSDT daily candles, Jan 2021–Aug 2026, Binance 0.1% taker fees included, spans the 2021 bull run, 2022 crash, and 2023–26 cycle). None of the five strategy families tested there beat plain buy-and-hold Bitcoin on raw return over that window — their edge was a much smaller drawdown and far less time exposed to the market, not higher absolute profit. Treat that as the realistic bar: the goal of this bot is a better risk profile than holding, not a guarantee of beating it.
-
-**Mandatory risk management (applies to all of the above):**
 - Risk a small, fixed percentage of capital per trade (commonly 0.5–1%), sized off the stop-loss distance, not a fixed coin amount.
 - Cap max concurrent open positions.
 - Add a daily/weekly loss circuit-breaker that pauses the bot after a max drawdown threshold is hit, rather than letting it keep trading through a bad stretch.
@@ -103,6 +101,8 @@ Long when price closes above the highest high of the prior 20 daily bars, exit w
 - Test across multiple distinct BTC regimes (e.g. the 2020–21 bull run, the 2022 bear market, and a choppy/sideways stretch), not just the most recent months — a strategy that only works in one regime isn't done yet.
 - Use walk-forward or out-of-sample validation, not just an in-sample fit — the biggest risk here is curve-fitting parameters to past data that won't hold up going forward.
 - Track more than total return: Sharpe ratio, max drawdown, win rate, and profit factor all matter for judging whether a strategy is actually robust.
+- **Single-sample-path caveat:** BTC has only one historical price path (~6–7 years of meaningful data). A public study "confirming" a strategy family (Section 6/7's evidence notes) and this project's own backtests both draw on largely the same underlying history — that overlap means they are not independent confirmations of each other, and repeated re-slicing of the same BTC window is not a substitute for genuinely new data. Cross-asset validation (Phase 3.5) is the practical way to get independent evidence without waiting years for fresh candles.
+- **Pilot backtest findings (logged here so this isn't re-litigated from scratch):** an initial sweep found `rsi_bb` produces only 2–5 trades across a 4-year window regardless of parameters, with results swinging from +$138 to -$449 on small threshold changes — not enough trades to distinguish a real edge from noise, and it did not beat plain `donchian` run alone on the identical window. Recommendation: don't deploy `rsi_bb` as designed on daily BTC data; treat "stay in cash while ranging, no active mean-reversion" as the more defensible default. Separately, `donchian` with a widened exit channel (channel_period=20, exit_channel_period=55) looked strong in-sample on 2020–23 (PF 3.94, 64.3% win rate) but came back at essentially breakeven out-of-sample on 2024+ (PF 0.91, 50% win rate) — no confirmed edge yet. Treat this as the current state of evidence, not a final verdict; Phase 3.5 and the Phase 4 shadow run are what will actually move it.
 
 ## 9. Alerting Layer
 
@@ -136,23 +136,10 @@ Long when price closes above the highest high of the prior 20 daily bars, exit w
 1. **Phase 1 — Data**: Binance read-only connectivity via `ccxt`, OHLCV storage, historical backfill. No exchange account credentials needed yet.
 2. **Phase 2 — Strategy + Backtest**: pluggable strategy interface, at least strategies (a) and (b) above, backtesting harness with Quidax's real fee (0.1%) and a slippage assumption, across multiple regimes.
 3. **Phase 3 — Alerting**: Telegram integration, paper-mode signal alerts only (no execution).
-4. **Phase 4 — Shadow run**: let it run live on the VPS in paper/alert-only mode for a few weeks, compare real-time behavior against backtest expectations before trusting it.
+3.5. **Phase 3.5 — Cross-asset validation**: before committing to a shadow run, re-run the exact fixed rule set that came out of Phase 2 (no re-tuning) on ETH/USDT and 1–2 other liquid majors, same train/test windows. BTC only has one historical path, so repeated backtests against it are not independent evidence of anything — this is the fastest way to get genuinely independent test data without waiting years for fresh BTC candles. A directionally similar result across assets is real evidence of a mechanism; a result that only works on BTC's specific 2020–23 window is evidence of an artifact.
+4. **Phase 4 — Shadow run**: let it run live on the VPS in paper/alert-only mode for a few weeks, compare real-time behavior against backtest expectations before trusting it. **Acceptance bar**: grade this against "holds up near breakeven while meaningfully cutting drawdown and time-in-market versus holding," not "beats buy-and-hold" — everything tested so far points to an edge somewhere between roughly zero and modest, and grading against outperformance sets up a comparison the strategy was never shown to support.
 5. **Phase 5 — Execution (optional)**: build the Quidax REST client, open a Quidax account + API key (trading scope only), manual-confirm mode first, full auto only after Phase 4 has proven out and the circuit-breaker/risk controls are tested.
-6. **Phase 6 — Optional ML confidence filter**: only after Phase 4/5 have a proven live-paper track record. See Section 14.
 
-## 14. Optional Enhancement — ML Confidence Filter (Phase 6)
+## 14. Disclaimer
 
-Not a prerequisite, and not a promise of higher profitability — this is a filter on top of the existing rule-based strategies, not a replacement or a new alpha source. Only build this after Phase 4/5 have a proven live-paper track record; adding it earlier just makes debugging harder.
-
-**What it does:** instead of generating new trade ideas, it scores each signal the rule-based strategies already produce and lets the bot suppress low-confidence ones — fewer false positives/whipsaws, not new opportunities.
-
-- **Model**: LightGBM or XGBoost — free, CPU-only, trains and runs fine on the existing VPS, no GPU needed.
-- **Labels**: for each historical instance where strategy (a)/(b)/(c) fired, label whether price actually followed through in the next N candles (binary yes/no, N tuned per strategy/timeframe).
-- **Features**: the indicator values and regime state at signal time (EMA distance, ADX, RSI, ATR, volume relative to average, Binance funding rate), not raw price — the model should learn "when does this rule tend to work," not try to predict price directly.
-- **Output**: a follow-through probability. Only forward the alert (and, later, execute) if it clears a threshold (e.g. >60%) — tune the threshold on validation data, not by eyeballing it.
-- **Free extra input, no ML needed**: the Crypto Fear & Greed Index (alternative.me, free public API) as another regime feature alongside funding rate — worth adding regardless of whether the ML filter ships.
-
-**Validation requirement (non-negotiable):** backtest the filtered signals against the unfiltered rule-only baseline, out-of-sample, across the same multiple regimes from Section 8. A small model trained on limited BTC history overfits easily — if the filtered version doesn't clearly beat the baseline out-of-sample, don't ship it just because it looked better in-sample.
-## 15. Disclaimer
-
-This spec is a technical build plan, not financial advice. No strategy here is guaranteed to be profitable — crypto markets are volatile and regimes change. Backtest thoroughly, paper-trade before risking capital, and only trade with money you can afford to lose.
+This spec is a technical build plan, not financial advice. No strategy here is guaranteed to be profitable — crypto markets are volatile and regimes change. Backtest thoroughly, paper-trade before risking capital, and only trade with money you can afford to lose. As of the most recent pilot testing (Section 8), none of the configurations tried so far have produced a result that clearly survives out-of-sample validation — that's expected at this stage, not a reason to abandon the approach, but it means Phase 5 (real execution) should stay gated behind Phase 3.5 and a genuine Phase 4 shadow run, not opened on the strength of an in-sample backtest alone.
