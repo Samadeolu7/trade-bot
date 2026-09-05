@@ -66,7 +66,7 @@ All events logged to SQLite for later review and strategy comparison.
 - Build a pluggable strategy interface (e.g. a base class with a `generate_signal(df) -> Signal | None` method) so multiple strategies can run side by side and be swapped via config, not code changes.
 - Each strategy reads its parameters from a config file (YAML/JSON) — timeframe, indicator periods, thresholds, position sizing rule.
 - A `Signal` event should carry: symbol, timeframe, direction (long/short/flat), entry price, stop-loss, take-profit, confidence/reason string, timestamp.
-- Add a **market regime filter** (e.g. ADX or realized volatility) that determines which sub-strategy is "live" at any time — this is the part that's genuinely different from a single fixed TradingView alert, since the bot adapts to trending vs. ranging conditions instead of firing one static rule all the time.
+- Add a **market regime filter** (e.g. ADX, realized volatility, or price vs. SMA(200)) that determines which sub-strategy is "live" at any time — this is the part that's genuinely different from a single fixed TradingView alert, since the bot adapts to trending vs. ranging conditions instead of firing one static rule all the time. An independent reproducible backtest (CoinQuant, BTCUSDT daily, 2021–2026, fees included) found an SMA(200) trend filter drove the best risk-adjusted result of the strategies it tested (profit factor 2.02) — worth backtesting as the primary trend/range switch, with ADX as a secondary confirmation.
 
 ## 7. Candidate Strategies for BTC/USD
 
@@ -83,6 +83,13 @@ BTC tends to move in volatility clusters — long compression (tight Bollinger B
 
 **d) Crypto-specific: funding rate mean-reversion**
 Unlike traditional markets, perpetual futures funding rates are public and often overextend at sentiment extremes — very high positive funding tends to correlate with over-leveraged longs (short-term pullback risk), and very negative funding with over-leveraged shorts. This is the kind of signal mainstream TradingView alerts don't offer out of the box and can be pulled read-only via `ccxt`'s Binance funding-rate endpoint (Quidax is spot-only, no perpetuals, so this data has to come from Binance). Used as a filter/confirmation input only — the resulting trade still executes on Quidax's spot market, not on Binance.
+
+**e) Trend-following: 20-bar Donchian breakout**
+Long when price closes above the highest high of the prior 20 daily bars, exit when it closes below the lowest low of the prior 20 bars. In the same independent reproducible backtest referenced above, this was the single best performer by raw return (+118.4% over 2021–2026 on BTCUSDT, 24 trades, 50% win rate, profit factor 1.45) — but also the largest drawdown of the trend strategies tested (48.6%, concentrated in the 2022 bear market), so it needs the same regime filter and risk sizing as (a). Cheap to implement — it's just a rolling max/min comparison — and worth including alongside (a) as a second trend-following candidate to backtest side by side.
+
+**Explicitly not included: naive grid trading.** It's the most heavily marketed "profitable" crypto bot strategy, but the claims behind it are almost entirely exchange marketing rather than reproducible backtests, and its mechanics are structurally built for sideways markets — a strong sustained trend drives price outside the grid and leaves it holding unrealized losing positions, the same failure mode that made the Bollinger mean-reversion strategy above the worst performer in the real test (65.7% win rate, only +10.4% return, 52.7% drawdown). If it's added later, it needs a hard "pause during confirmed trend" kill-switch tied to the same regime filter as everything else, not a standalone always-on strategy.
+
+**Evidence note for Claude Code:** strategies (a) and (e) above were validated against an independent, reproducible backtest (CoinQuant, BTCUSDT daily candles, Jan 2021–Aug 2026, Binance 0.1% taker fees included, spans the 2021 bull run, 2022 crash, and 2023–26 cycle). None of the five strategy families tested there beat plain buy-and-hold Bitcoin on raw return over that window — their edge was a much smaller drawdown and far less time exposed to the market, not higher absolute profit. Treat that as the realistic bar: the goal of this bot is a better risk profile than holding, not a guarantee of beating it.
 
 **Mandatory risk management (applies to all of the above):**
 - Risk a small, fixed percentage of capital per trade (commonly 0.5–1%), sized off the stop-loss distance, not a fixed coin amount.
