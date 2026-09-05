@@ -3,6 +3,7 @@ import pytest
 
 from bot.backtest.engine import Trade
 from bot.backtest.metrics import (
+    breakdown_by_strategy,
     buy_hold_return_pct,
     max_drawdown_pct,
     periods_per_year,
@@ -14,7 +15,7 @@ from bot.backtest.metrics import (
 )
 
 
-def make_trade(pnl: float) -> Trade:
+def make_trade(pnl: float, strategy_name: str = "test") -> Trade:
     return Trade(
         direction="long",
         entry_time=0,
@@ -24,6 +25,7 @@ def make_trade(pnl: float) -> Trade:
         size=1.0,
         pnl=pnl,
         exit_reason="test",
+        strategy_name=strategy_name,
     )
 
 
@@ -121,3 +123,30 @@ def test_buy_hold_return_pct():
 def test_buy_hold_return_pct_empty_or_single_row():
     assert buy_hold_return_pct(pd.Series(dtype=float)) == 0.0
     assert buy_hold_return_pct(pd.Series([30_000.0])) == 0.0
+
+
+def test_breakdown_by_strategy_groups_and_computes_per_group_metrics():
+    trades = [
+        make_trade(100, "donchian"),
+        make_trade(-50, "donchian"),
+        make_trade(-20, "rsi_bb"),
+        make_trade(-30, "rsi_bb"),
+    ]
+
+    result = breakdown_by_strategy(trades)
+
+    assert set(result.keys()) == {"donchian", "rsi_bb"}
+
+    assert result["donchian"]["trades"] == 2
+    assert result["donchian"]["win_rate_pct"] == pytest.approx(50.0)
+    assert result["donchian"]["profit_factor"] == pytest.approx(2.0)
+    assert result["donchian"]["total_pnl"] == pytest.approx(50.0)
+
+    assert result["rsi_bb"]["trades"] == 2
+    assert result["rsi_bb"]["win_rate_pct"] == 0.0
+    assert result["rsi_bb"]["profit_factor"] == 0.0  # no wins at all
+    assert result["rsi_bb"]["total_pnl"] == pytest.approx(-50.0)
+
+
+def test_breakdown_by_strategy_empty_trades():
+    assert breakdown_by_strategy([]) == {}

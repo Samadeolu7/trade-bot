@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from bot.strategy.rsi_bb import RsiBollingerStrategy
 
@@ -102,3 +103,17 @@ def test_entry_signals_no_signal_on_flat_market():
     df = make_df([100.0] * 60)
     signals = strategy.entry_signals(df)
     assert signals["direction"].isna().all()
+
+
+def test_stop_band_mult_scales_stop_distance_independent_of_target():
+    df = make_df([100.0] * 59 + [80.0])
+
+    default_signal = RsiBollingerStrategy({}).generate_signal(df)  # stop_band_mult=1.0
+    tight_signal = RsiBollingerStrategy({"stop_band_mult": 0.5}).generate_signal(df)
+
+    default_stop_distance = default_signal.entry_price - default_signal.stop_loss
+    tight_stop_distance = tight_signal.entry_price - tight_signal.stop_loss
+
+    assert tight_stop_distance == pytest.approx(default_stop_distance * 0.5)
+    # target (take_profit) is unaffected by stop_band_mult -> better reward:risk
+    assert tight_signal.take_profit == default_signal.take_profit

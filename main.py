@@ -4,7 +4,7 @@ import logging
 import pandas as pd
 
 from bot.backtest.engine import run_backtest
-from bot.backtest.metrics import summarize
+from bot.backtest.metrics import breakdown_by_strategy, summarize
 from bot.config import load_config
 from bot.data.backfill import backfill_candles
 from bot.data.exchange import create_exchange
@@ -37,6 +37,12 @@ def _build_regime_filter(strategy_config: dict):
         adx_period=regime_config.get("adx_period", 14),
         adx_threshold=regime_config.get("adx_threshold", 25),
     )
+
+
+def _with_override(strategy_config: dict, section: str, key: str, value) -> dict:
+    if value is None:
+        return strategy_config
+    return {**strategy_config, section: {**strategy_config.get(section, {}), key: value}}
 
 
 def _build_strategy(name: str, strategy_config: dict) -> Strategy:
@@ -101,6 +107,43 @@ def main() -> None:
         default=None,
         help="only for --strategy regime_switched: overrides strategy.regime.type",
     )
+    backtest_parser.add_argument(
+        "--exit-channel-period",
+        type=int,
+        default=None,
+        help="donchian (standalone or as regime_switched's trend strategy): "
+        "overrides strategy.donchian.exit_channel_period",
+    )
+    backtest_parser.add_argument(
+        "--exit-method",
+        choices=["channel", "atr"],
+        default=None,
+        help="donchian: overrides strategy.donchian.exit_method",
+    )
+    backtest_parser.add_argument(
+        "--donchian-atr-period",
+        type=int,
+        default=None,
+        help="donchian with --exit-method atr: overrides strategy.donchian.atr_period",
+    )
+    backtest_parser.add_argument(
+        "--donchian-atr-mult",
+        type=float,
+        default=None,
+        help="donchian with --exit-method atr: overrides strategy.donchian.atr_mult",
+    )
+    backtest_parser.add_argument(
+        "--rsi-oversold", type=float, default=None, help="overrides strategy.rsi_bb.rsi_oversold"
+    )
+    backtest_parser.add_argument(
+        "--rsi-overbought", type=float, default=None, help="overrides strategy.rsi_bb.rsi_overbought"
+    )
+    backtest_parser.add_argument(
+        "--bb-std", type=float, default=None, help="overrides strategy.rsi_bb.bb_std"
+    )
+    backtest_parser.add_argument(
+        "--stop-band-mult", type=float, default=None, help="overrides strategy.rsi_bb.stop_band_mult"
+    )
 
     args = parser.parse_args()
 
@@ -135,19 +178,28 @@ def main() -> None:
         strategy_config = config.get("strategy", {})
         backtest_config = config.get("backtest", {})
 
-        if args.trend_strategy:
-            strategy_config = {
-                **strategy_config,
-                "regime_switched": {
-                    **strategy_config.get("regime_switched", {}),
-                    "trend_strategy": args.trend_strategy,
-                },
-            }
-        if args.regime_type:
-            strategy_config = {
-                **strategy_config,
-                "regime": {**strategy_config.get("regime", {}), "type": args.regime_type},
-            }
+        strategy_config = _with_override(
+            strategy_config, "regime_switched", "trend_strategy", args.trend_strategy
+        )
+        strategy_config = _with_override(strategy_config, "regime", "type", args.regime_type)
+        strategy_config = _with_override(
+            strategy_config, "donchian", "exit_channel_period", args.exit_channel_period
+        )
+        strategy_config = _with_override(strategy_config, "donchian", "exit_method", args.exit_method)
+        strategy_config = _with_override(
+            strategy_config, "donchian", "atr_period", args.donchian_atr_period
+        )
+        strategy_config = _with_override(
+            strategy_config, "donchian", "atr_mult", args.donchian_atr_mult
+        )
+        strategy_config = _with_override(strategy_config, "rsi_bb", "rsi_oversold", args.rsi_oversold)
+        strategy_config = _with_override(
+            strategy_config, "rsi_bb", "rsi_overbought", args.rsi_overbought
+        )
+        strategy_config = _with_override(strategy_config, "rsi_bb", "bb_std", args.bb_std)
+        strategy_config = _with_override(
+            strategy_config, "rsi_bb", "stop_band_mult", args.stop_band_mult
+        )
 
         strategy = _build_strategy(args.strategy, strategy_config)
 
@@ -166,6 +218,10 @@ def main() -> None:
             args.timeframe,
             close=df["close"],
         )
+        by_strategy = breakdown_by_strategy(result.trades)
+        if len(by_strategy) > 1:
+            summary["by_strategy"] = by_strategy
+
         logger.info(
             "backtest complete: %s %s %s over %d candles -> %s",
             args.strategy, symbol, args.timeframe, len(df), summary,

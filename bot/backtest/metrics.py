@@ -61,6 +61,29 @@ def buy_hold_return_pct(close: pd.Series) -> float:
     return (close.iloc[-1] / close.iloc[0] - 1) * 100
 
 
+def breakdown_by_strategy(trades: list[Trade]) -> dict[str, dict]:
+    """Splits trades by which sub-strategy opened them (Trade.strategy_name)
+    and reports each group's own trade count/win rate/profit factor/total
+    pnl. For a composite like regime_switched, this answers "how did the
+    trades the regime filter actually handed to rsi_bb perform" — as opposed
+    to rsi_bb's standalone (ungated) numbers, which include periods it was
+    never designed to trade in (spec Section 7b) and so aren't a fair test of
+    whether the regime-gated version has a real edge."""
+    by_name: dict[str, list[Trade]] = {}
+    for t in trades:
+        by_name.setdefault(t.strategy_name, []).append(t)
+
+    return {
+        name: {
+            "trades": len(group),
+            "win_rate_pct": round(float(win_rate_pct(group)), 2),
+            "profit_factor": round(float(profit_factor(group)), 2) if group else 0.0,
+            "total_pnl": round(float(sum(t.pnl for t in group)), 2),
+        }
+        for name, group in by_name.items()
+    }
+
+
 def summarize(
     trades: list[Trade],
     equity_curve: pd.Series,

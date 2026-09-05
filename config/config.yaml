@@ -41,8 +41,13 @@ strategy:
     bb_std: 2.0
     rsi_oversold: 30
     rsi_overbought: 70
+    stop_band_mult: 1.0  # stop distance as a multiple of band-width, independent of the bb_mid target
   donchian:
     channel_period: 20
+    exit_method: channel  # channel | atr
+    exit_channel_period: 55  # channel exit only; longer than entry so normal pullbacks don't chop the position out mid-trend — a free parameter, not a settled value, sweep it
+    atr_period: 14        # atr exit only
+    atr_mult: 2.0         # atr exit only
 
 backtest:
   fee: 0.001          # Quidax order-book taker fee

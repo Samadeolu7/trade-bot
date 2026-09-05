@@ -8,8 +8,10 @@ from bot.strategy.base import Signal, Strategy
 class RsiBollingerStrategy(Strategy):
     """Mean-reversion: fade RSI extremes at the Bollinger Bands in range-bound
     conditions (spec Section 7b). Intended to run only while RegimeFilter
-    reports "ranging". Target is the band midline; stop is one band-width
-    beyond entry."""
+    reports "ranging". Target is the band midline; stop is `stop_band_mult`
+    band-widths beyond entry — decoupled from the target distance (rather
+    than always exactly one band-width, i.e. ~1:1 reward:risk) so the
+    reward:risk ratio is independently tunable from the entry/exit thresholds."""
 
     name = "rsi_bb"
 
@@ -20,6 +22,7 @@ class RsiBollingerStrategy(Strategy):
         self.bb_std = params.get("bb_std", 2.0)
         self.rsi_oversold = params.get("rsi_oversold", 30)
         self.rsi_overbought = params.get("rsi_overbought", 70)
+        self.stop_band_mult = params.get("stop_band_mult", 1.0)
         self.min_lookback = max(self.rsi_period, self.bb_period) * 3
 
     def _indicators(self, df: pd.DataFrame) -> tuple[pd.Series, pd.DataFrame]:
@@ -46,7 +49,7 @@ class RsiBollingerStrategy(Strategy):
                 timeframe="",
                 direction="long",
                 entry_price=entry,
-                stop_loss=entry - band_width,
+                stop_loss=entry - self.stop_band_mult * band_width,
                 take_profit=bb["bb_mid"],
                 reason=f"RSI {last_rsi:.1f} < {self.rsi_oversold} at/below lower Bollinger Band",
                 timestamp=timestamp,
@@ -57,7 +60,7 @@ class RsiBollingerStrategy(Strategy):
                 timeframe="",
                 direction="short",
                 entry_price=entry,
-                stop_loss=entry + band_width,
+                stop_loss=entry + self.stop_band_mult * band_width,
                 take_profit=bb["bb_mid"],
                 reason=f"RSI {last_rsi:.1f} > {self.rsi_overbought} at/above upper Bollinger Band",
                 timestamp=timestamp,
@@ -75,7 +78,9 @@ class RsiBollingerStrategy(Strategy):
 
         direction = np.where(oversold, "long", np.where(overbought, "short", None))
         stop_loss = np.where(
-            oversold, close - band_width, np.where(overbought, close + band_width, np.nan)
+            oversold,
+            close - self.stop_band_mult * band_width,
+            np.where(overbought, close + self.stop_band_mult * band_width, np.nan),
         )
         take_profit = np.where(oversold | overbought, bb_frame["bb_mid"], np.nan)
 

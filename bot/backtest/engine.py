@@ -15,6 +15,7 @@ class Trade:
     size: float
     pnl: float
     exit_reason: str
+    strategy_name: str
 
 
 @dataclass
@@ -157,6 +158,7 @@ def run_backtest(
                         size=position["size"],
                         pnl=pnl,
                         exit_reason=exit_reason,
+                        strategy_name=position["strategy"].name,
                     )
                 )
                 position = None
@@ -198,6 +200,7 @@ def run_backtest(
                 size=position["size"],
                 pnl=pnl,
                 exit_reason="end_of_data",
+                strategy_name=position["strategy"].name,
             )
         )
         values[-1] = equity

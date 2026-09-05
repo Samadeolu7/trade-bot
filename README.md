@@ -46,9 +46,15 @@ A pluggable `Strategy` interface (`bot/strategy/base.py`) plus:
 
 - `ema_cross` — trend-following EMA cross with an ATR trailing stop (spec 7a).
 - `rsi_bb` — RSI/Bollinger mean-reversion, fading extremes back to the midline (spec 7b).
-- `donchian` — trend-following breakout of the prior N-bar high/low channel (spec 7e); the exit
-  (opposite channel boundary) is managed as a trailing stop, the same mechanism as ema_cross's ATR
-  stop, rather than a separate close-only exit path.
+- `donchian` — trend-following breakout of the prior N-bar high/low channel (spec 7e). Entry and
+  exit use separate channel periods (`channel_period`/`exit_channel_period`) — a single shared
+  period means a routine pullback within a trend can breach the same-width exit channel, closing
+  the position on normal chop rather than a real reversal. `exit_method: atr` is an alternative to
+  the wider-channel exit: an ATR-based trailing stop (the same mechanism `ema_cross` uses), sized
+  off actual volatility rather than a second lookback window. Neither is a settled choice — both
+  the exit channel width and exit method are free parameters to sweep (`--exit-channel-period`,
+  `--exit-method`, `--donchian-atr-period`, `--donchian-atr-mult`), not values to anchor on because
+  they sound familiar from a well-known system.
 - `regime_switched` — a `RegimeFilter` (spec Section 6) that runs a trend strategy while "trending"
   and `rsi_bb` while "ranging", so the bot adapts instead of firing one static rule. Which trend
   strategy (`ema_cross`/`donchian`) and which regime filter (`adx`/`sma200`) are config-driven
@@ -56,7 +62,14 @@ A pluggable `Strategy` interface (`bot/strategy/base.py`) plus:
   `--trend-strategy`/`--regime-type` as one-off CLI overrides for comparing combos without editing
   the file baked into the Docker image. An independent backtest found `sma200` the stronger
   risk-adjusted primary switch, with ADX as secondary confirmation (`strategy.regime_sma`) — worth
-  comparing against `adx`.
+  comparing against `adx`. `rsi_bb`'s own `--rsi-oversold`/`--rsi-overbought`/`--bb-std`/
+  `--stop-band-mult` are also CLI-overridable, for the same reason.
+
+`regime_switched` results include a `by_strategy` breakdown (trade count/win rate/profit factor/
+total pnl per sub-strategy) whenever more than one fired. This is what actually tells you whether
+the mean-reversion side has an edge in the conditions the regime filter selected it for — its
+*standalone*, ungated numbers include periods it was never designed to trade in (spec 7b explicitly
+expects it to lose during a real trend), so they're not a fair test on their own.
 
 Indicators (EMA/RSI/Bollinger/ATR/ADX) are hand-implemented in `bot/indicators/` rather than via
 `pandas-ta`/`vectorbt` as the spec's stack table suggests — avoids adding a numba/JIT dependency to
