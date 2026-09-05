@@ -184,12 +184,30 @@ also not purely a BTC-2020-23 artifact. Exactly the kind of result the spec
 anticipated as plausible, and consistent with shadow-testing at alert-only
 risk rather than trusting it with capital.
 
-**Outstanding: you still need to add real Telegram credentials.** SSH to the
-VPS, edit `/opt/btc-trade-bot/.env`, set `TELEGRAM_BOT_TOKEN`/
-`TELEGRAM_CHAT_ID` (get the token from @BotFather, the chat ID by messaging
-your bot once and checking `https://api.telegram.org/bot<token>/getUpdates`),
-then `docker compose up -d` to pick it up. Until then the bot runs correctly
-but every alert is only logged, never delivered.
+**Telegram credentials: done, confirmed working.** Real `DAILY_SUMMARY` and
+`HEARTBEAT` messages delivered and received. Getting here surfaced two real
+bugs, both fixed:
+1. `maybe_send_heartbeat`/`maybe_send_daily_summary` marked their state as
+   "sent" even when `alerter.send()` returned `False` (Telegram unconfigured
+   or briefly down) — meaning a single failed attempt would silently block
+   retries for up to 24h (heartbeat) or until the next UTC day (summary).
+   Fixed: state now only updates on confirmed delivery, so it retries every
+   poll cycle until it actually gets through. Tested
+   (`test_heartbeat_retries_every_call_until_delivery_succeeds`,
+   `test_daily_summary_retries_until_delivery_succeeds`).
+2. The bug above meant the *first* attempt (made before credentials were
+   added) had already written a stale "handled" marker into the persistent
+   `bot_state` table — which survives container restarts (named volume), so
+   even after adding credentials the fix alone wouldn't retry until the
+   stale markers aged out. Cleared them directly via a temporary one-off
+   workflow (same SSH pattern as Phase 3.5/the health check, deleted after
+   use) so the very next poll cycle would deliver immediately rather than
+   making the user wait up to a day to confirm alerting actually works.
+
+Also: partway through this, the user pasted their real bot token in chat
+while debugging a malformed `getUpdates` URL. Flagged it and recommended
+revoking/regenerating via @BotFather rather than continuing to use it — they
+did, and the new token is what's now confirmed working.
 
 **Judgment calls worth double-checking:**
 1. Kept the regime filter as `adx` rather than switching to `sma200` (Step
