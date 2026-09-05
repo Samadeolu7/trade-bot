@@ -3,8 +3,19 @@ from unittest.mock import MagicMock
 import pandas as pd
 
 from bot.backtest.engine import open_position as engine_open_position
-from bot.shadow.runner import _drop_incomplete_bar, shadow_poll_once
-from bot.storage.db import connect, get_open_paper_position, open_paper_position, upsert_candles
+from bot.shadow.runner import (
+    _drop_incomplete_bar,
+    maybe_send_daily_summary,
+    maybe_send_heartbeat,
+    shadow_poll_once,
+)
+from bot.storage.db import (
+    connect,
+    get_open_paper_position,
+    get_state,
+    open_paper_position,
+    upsert_candles,
+)
 from bot.strategy.base import Signal, Strategy
 
 
@@ -199,6 +210,47 @@ def test_end_to_end_with_real_production_strategy(tmp_path):
     assert position["direction"] == "long"
     alerter.send.assert_called_once()
     assert "SIGNAL_FIRED" in alerter.send.call_args[0][0]
+
+
+def test_heartbeat_retries_every_call_until_delivery_succeeds(tmp_path):
+    conn = make_conn(tmp_path)
+    failing_alerter = MagicMock()
+    failing_alerter.send.return_value = False
+
+    maybe_send_heartbeat(conn, failing_alerter, "BTC/USDT", "1d", interval_seconds=86400)
+    assert get_state(conn, "last_heartbeat_at") is None  # not marked sent — should retry
+
+    maybe_send_heartbeat(conn, failing_alerter, "BTC/USDT", "1d", interval_seconds=86400)
+    assert failing_alerter.send.call_count == 2  # retried immediately, not backed off 24h
+
+    succeeding_alerter = MagicMock()
+    succeeding_alerter.send.return_value = True
+    maybe_send_heartbeat(conn, succeeding_alerter, "BTC/USDT", "1d", interval_seconds=86400)
+    assert get_state(conn, "last_heartbeat_at") is not None  # now correctly marked sent
+
+    # a further call within the interval should not re-send
+    maybe_send_heartbeat(conn, succeeding_alerter, "BTC/USDT", "1d", interval_seconds=86400)
+    assert succeeding_alerter.send.call_count == 1
+
+
+def test_daily_summary_retries_until_delivery_succeeds(tmp_path):
+    conn = make_conn(tmp_path)
+    failing_alerter = MagicMock()
+    failing_alerter.send.return_value = False
+
+    maybe_send_daily_summary(conn, failing_alerter, "binance", "BTC/USDT", "1d")
+    assert get_state(conn, "last_summary_date") is None
+
+    maybe_send_daily_summary(conn, failing_alerter, "binance", "BTC/USDT", "1d")
+    assert failing_alerter.send.call_count == 2  # retried, not skipped for the rest of the day
+
+    succeeding_alerter = MagicMock()
+    succeeding_alerter.send.return_value = True
+    maybe_send_daily_summary(conn, succeeding_alerter, "binance", "BTC/USDT", "1d")
+    assert get_state(conn, "last_summary_date") is not None
+
+    maybe_send_daily_summary(conn, succeeding_alerter, "binance", "BTC/USDT", "1d")
+    assert succeeding_alerter.send.call_count == 1
 
 
 def test_drop_incomplete_bar_keeps_bars_whose_period_has_ended():

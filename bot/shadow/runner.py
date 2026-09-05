@@ -136,8 +136,13 @@ def maybe_send_heartbeat(
     last = get_state(conn, "last_heartbeat_at")
     if last is not None and now_ms - int(last) < interval_seconds * 1000:
         return
-    alerter.send(format_heartbeat(symbol, timeframe))
-    set_state(conn, "last_heartbeat_at", str(now_ms))
+    # Only mark it "sent" if it actually was — if Telegram is unconfigured or
+    # briefly down, a heartbeat exists to keep retrying every iteration until
+    # it gets through, not to silently go quiet for a full interval because
+    # the first attempt failed (that's exactly the failure a heartbeat is
+    # supposed to catch).
+    if alerter.send(format_heartbeat(symbol, timeframe)):
+        set_state(conn, "last_heartbeat_at", str(now_ms))
 
 
 def maybe_send_daily_summary(
@@ -151,10 +156,11 @@ def maybe_send_daily_summary(
     trades_today = count_paper_trades_since(conn, exchange_id, symbol, timeframe, since_ms)
     trades_all_time = count_paper_trades_all_time(conn, exchange_id, symbol, timeframe)
     total_pnl_pct = sum_paper_trade_pnl_pct(conn, exchange_id, symbol, timeframe)
-    alerter.send(
+    sent = alerter.send(
         format_daily_summary(symbol, timeframe, open_position, trades_today, trades_all_time, total_pnl_pct)
     )
-    set_state(conn, "last_summary_date", today)
+    if sent:
+        set_state(conn, "last_summary_date", today)
 
 
 def run_shadow_loop(
