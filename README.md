@@ -72,10 +72,15 @@ python main.py backtest --strategy regime_switched --timeframe 1h --start 2020-0
 ```
 
 `--strategy` is `ema_cross`, `rsi_bb`, `donchian`, or `regime_switched`. Requires candles already stored via
-`backfill`. Prints trade count, total return, max drawdown, Sharpe ratio, win rate, and profit
-factor — fees (0.001, Quidax's real taker fee) and slippage (0.0005) are applied per trade, per
-spec Section 8. Strategy/backtest parameters live under `strategy:`/`backtest:` in
-`config/config.yaml`.
+`backfill`. Prints trade count, total return, max drawdown, Sharpe ratio, win rate, profit factor,
+and buy-and-hold return over the same window — fees (0.001, Quidax's real taker fee) and slippage
+(0.0005) are applied per trade, per spec Section 8. Strategy/backtest parameters live under
+`strategy:`/`backtest:` in `config/config.yaml`.
+
+The buy-and-hold number matters: spec Section 7's evidence note says none of the reference
+strategies actually beat it on raw return — their edge was a better risk profile (smaller
+drawdown, less time exposed), not higher absolute profit. A backtest result only means something
+next to that baseline, not in isolation.
 
 Per spec Section 8, don't judge a strategy from one date range — rerun `--start`/`--end` across a
 few distinct regimes (e.g. the 2020-21 bull run, the 2022 bear market, a choppy stretch) before

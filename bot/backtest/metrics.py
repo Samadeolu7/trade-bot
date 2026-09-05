@@ -50,10 +50,25 @@ def profit_factor(trades: list[Trade]) -> float:
     return gross_profit / gross_loss
 
 
+def buy_hold_return_pct(close: pd.Series) -> float:
+    """Simple buy-and-hold return over the same price series/window a
+    backtest used — the baseline spec Section 7's evidence note says none of
+    the reference strategies actually beat (their edge was a better risk
+    profile, not higher raw return). Ignores fees/slippage, same as a real
+    single buy-and-hold would."""
+    if len(close) < 2 or close.iloc[0] <= 0:
+        return 0.0
+    return (close.iloc[-1] / close.iloc[0] - 1) * 100
+
+
 def summarize(
-    trades: list[Trade], equity_curve: pd.Series, initial_capital: float, timeframe: str
+    trades: list[Trade],
+    equity_curve: pd.Series,
+    initial_capital: float,
+    timeframe: str,
+    close: pd.Series | None = None,
 ) -> dict:
-    return {
+    result = {
         "trades": len(trades),
         "total_return_pct": round(float(total_return_pct(equity_curve, initial_capital)), 2),
         "max_drawdown_pct": round(float(max_drawdown_pct(equity_curve)), 2),
@@ -61,3 +76,6 @@ def summarize(
         "win_rate_pct": round(float(win_rate_pct(trades)), 2),
         "profit_factor": round(float(profit_factor(trades)), 2) if trades else 0.0,
     }
+    if close is not None:
+        result["buy_hold_pct"] = round(float(buy_hold_return_pct(close)), 2)
+    return result

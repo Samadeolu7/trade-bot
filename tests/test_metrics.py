@@ -3,6 +3,7 @@ import pytest
 
 from bot.backtest.engine import Trade
 from bot.backtest.metrics import (
+    buy_hold_return_pct,
     max_drawdown_pct,
     periods_per_year,
     profit_factor,
@@ -101,3 +102,22 @@ def test_summarize_contains_expected_keys():
         "profit_factor",
     }
     assert result["trades"] == 3
+
+
+def test_summarize_includes_buy_hold_pct_when_close_given():
+    equity_curve = pd.Series([10_000.0, 10_500.0])
+    close = pd.Series([30_000.0, 33_000.0])
+
+    result = summarize([], equity_curve, 10_000.0, "1h", close=close)
+
+    assert result["buy_hold_pct"] == pytest.approx(10.0)
+
+
+def test_buy_hold_return_pct():
+    close = pd.Series([30_000.0, 36_000.0])
+    assert buy_hold_return_pct(close) == pytest.approx(20.0)
+
+
+def test_buy_hold_return_pct_empty_or_single_row():
+    assert buy_hold_return_pct(pd.Series(dtype=float)) == 0.0
+    assert buy_hold_return_pct(pd.Series([30_000.0])) == 0.0

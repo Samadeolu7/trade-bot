@@ -164,6 +164,7 @@ def main() -> None:
             result.equity_curve,
             backtest_config.get("initial_capital", 10_000.0),
             args.timeframe,
+            close=df["close"],
         )
         logger.info(
             "backtest complete: %s %s %s over %d candles -> %s",
