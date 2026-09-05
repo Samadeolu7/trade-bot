@@ -149,9 +149,74 @@ instruction not to assume). Added:
   `shadow` already keeps candles fresh via its own resumable backfill call,
   so there's no need to run the old `poll` service alongside it.
 - Pushed and confirmed the deploy workflow succeeded (image built, container
-  restarted). I **cannot** confirm from here that the process is actually
-  behaving correctly at runtime — only that Docker reports it started. Please
-  check `docker compose logs -f trade-bot` at `/opt/btc-trade-bot` when back;
-  a `HEARTBEAT` line should appear within `alerting.heartbeat_interval_seconds`
-  (default 24h) once Telegram is configured, and `polled`/backfill-style log
-  lines should appear every `poll.interval_seconds` (300s) regardless.
+  restarted). Since "Docker reports it started" isn't the same as "actually
+  behaving correctly," added a second temporary verification workflow
+  (same SSH-and-commit-results pattern as Phase 3.5's) to pull back
+  `docker compose ps` + recent logs. **Confirmed healthy**:
+  - Container `Up 3 minutes`, not crash-looping.
+  - Correctly detected the empty `.env` and logged the expected warning
+    rather than crashing.
+  - On startup it computed and logged a real `DAILY_SUMMARY` (`position=flat,
+    trades_today=0`) and a `HEARTBEAT` from actual BTC/USDT data — both
+    correctly "dropped, not sent" since Telegram isn't configured yet, which
+    is the graceful-degradation behavior by design, not a bug.
+  - No exceptions, no `ERROR` alert.
+  Deleted `.github/workflows/verify-shadow-run.yml` now that it's confirmed —
+  same as the cross-asset one, not meant as permanent CI.
+
+---
+
+## Final summary (stopping here, per instructions)
+
+**What's running:** `btc_trade_bot` on the VPS, `python main.py shadow` —
+paper trading only, confirmed healthy (see above). Strategy: `regime_switched`
+= `donchian` (channel_period=20, exit_channel_period=55) while the ADX regime
+filter reads "trending", flat (no trade) while "ranging". BTC/USDT, 1d
+candles, checked every 300s. No orders placed anywhere, no Quidax code
+exists in the repo.
+
+**Cross-asset validation (Phase 3.5) verdict:** mixed. ETH held up
+out-of-sample (PF 2.21, meaningfully beat a nearly-flat buy-and-hold). BTC
+was roughly breakeven (PF 0.91). SOL clearly failed (PF 0.30). Full numbers
+in `btc-usd-bot-spec.md` Section 8 and `notes/cross_asset_results.md`. Read
+as: a weak, asset-dependent mechanism — not a robust cross-asset edge, but
+also not purely a BTC-2020-23 artifact. Exactly the kind of result the spec
+anticipated as plausible, and consistent with shadow-testing at alert-only
+risk rather than trusting it with capital.
+
+**Outstanding: you still need to add real Telegram credentials.** SSH to the
+VPS, edit `/opt/btc-trade-bot/.env`, set `TELEGRAM_BOT_TOKEN`/
+`TELEGRAM_CHAT_ID` (get the token from @BotFather, the chat ID by messaging
+your bot once and checking `https://api.telegram.org/bot<token>/getUpdates`),
+then `docker compose up -d` to pick it up. Until then the bot runs correctly
+but every alert is only logged, never delivered.
+
+**Judgment calls worth double-checking:**
+1. Kept the regime filter as `adx` rather than switching to `sma200` (Step
+   3 above) — the earlier BTC-only case for `sma200` was confounded by it
+   coincidentally avoiding `rsi_bb` almost entirely, which no longer applies
+   now that `rsi_bb` is out of the active path regardless. Low-stakes either
+   way (the filter's only job now is "pause during ranging"), but a real
+   choice I made, not a forced one.
+2. `regime_switched`'s exit config is `channel_period=20, exit_channel_period=55`
+   — the deployed default from Phase 2, not the wider values (70, 90) that
+   looked better in later exploration on the 2023+ window specifically. I
+   didn't change the deployed default based on that exploration because it
+   overlapped with the same window used for out-of-sample testing (see the
+   Phase 3.5 methodology note in the spec) — changing the default based on
+   it would have been fitting to the test set. Worth a fresh, genuinely
+   out-of-sample look at wider exits once more time has passed.
+3. Heartbeat cadence (once/24h) and poll interval (300s on daily candles) are
+   my own reasonable-default judgment calls, not derived from anything in
+   the spec — easy to change in `config.yaml` (`alerting.heartbeat_interval_seconds`,
+   `poll.interval_seconds`) if you want a different cadence.
+4. Found local SSH keys on this machine early on and deliberately did not
+   use them to connect anywhere (see "Known constraints" above) — used the
+   existing GitHub Actions secrets/deploy pipeline for everything instead,
+   including two temporary one-off workflows (both since deleted) to get
+   real cross-asset numbers and confirm the shadow run's health without
+   direct shell access.
+
+**Not touched, as instructed:** no Quidax client, no API key (real or
+placeholder beyond the pre-existing `.env.example` entry), no order-placement
+code path. Phase 5 is untouched and gated behind you being present.
