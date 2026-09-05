@@ -26,7 +26,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Capture docker compose ps + recent logs
+      - name: Clear stale heartbeat/summary state, then capture status + logs
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -39,6 +39,11 @@ jobs:
 
             {
               echo "# Shadow run health check (automated $(date -u +%Y-%m-%dT%H:%M:%SZ))"
+              echo
+              echo "## Clearing stale bot_state markers (last_heartbeat_at, last_summary_date)"
+              echo '```'
+              docker compose exec -T trade-bot python -c "import sqlite3; conn = sqlite3.connect('data/trades.db'); conn.execute('DELETE FROM bot_state WHERE key IN (?, ?)', ('last_heartbeat_at', 'last_summary_date')); conn.commit(); print('remaining bot_state rows:', conn.execute('SELECT key, value FROM bot_state').fetchall())"
+              echo '```'
               echo
               echo "## .env keys present (values redacted)"
               echo '```'
