@@ -11,26 +11,51 @@ from bot.data.exchange import create_exchange
 from bot.data.poll import run_poll_loop
 from bot.logging_setup import configure_logging
 from bot.storage.db import connect, query_candles_df
+from bot.strategy.donchian import DonchianBreakoutStrategy
 from bot.strategy.ema_cross import EmaCrossStrategy
-from bot.strategy.regime import RegimeFilter
+from bot.strategy.regime import RegimeFilter, Sma200RegimeFilter
 from bot.strategy.regime_switch import RegimeSwitchedStrategy
 from bot.strategy.rsi_bb import RsiBollingerStrategy
 from bot.strategy.base import Strategy
 
 logger = logging.getLogger(__name__)
 
-STRATEGY_CHOICES = ["ema_cross", "rsi_bb", "regime_switched"]
+STRATEGY_CHOICES = ["ema_cross", "rsi_bb", "donchian", "regime_switched"]
+
+
+def _build_trend_strategy(name: str, strategy_config: dict) -> Strategy:
+    if name == "donchian":
+        return DonchianBreakoutStrategy(strategy_config.get("donchian", {}))
+    return EmaCrossStrategy(strategy_config.get("ema_cross", {}))
+
+
+def _build_regime_filter(strategy_config: dict):
+    regime_config = strategy_config.get("regime", {})
+    if regime_config.get("type", "adx") == "sma200":
+        return Sma200RegimeFilter(**strategy_config.get("regime_sma", {}))
+    return RegimeFilter(
+        adx_period=regime_config.get("adx_period", 14),
+        adx_threshold=regime_config.get("adx_threshold", 25),
+    )
 
 
 def _build_strategy(name: str, strategy_config: dict) -> Strategy:
-    ema_strategy = EmaCrossStrategy(strategy_config.get("ema_cross", {}))
-    rsi_strategy = RsiBollingerStrategy(strategy_config.get("rsi_bb", {}))
     if name == "ema_cross":
-        return ema_strategy
+        return EmaCrossStrategy(strategy_config.get("ema_cross", {}))
     if name == "rsi_bb":
-        return rsi_strategy
-    regime_filter = RegimeFilter(**strategy_config.get("regime", {}))
-    return RegimeSwitchedStrategy(ema_strategy, rsi_strategy, regime_filter)
+        return RsiBollingerStrategy(strategy_config.get("rsi_bb", {}))
+    if name == "donchian":
+        return DonchianBreakoutStrategy(strategy_config.get("donchian", {}))
+
+    # regime_switched: trend sub-strategy and regime-filter type are
+    # config-driven (spec Section 1), not separate --strategy choices, so
+    # e.g. swapping ADX for SMA(200) or ema_cross for donchian is a
+    # config/config.yaml edit, not a code change.
+    rsi_strategy = RsiBollingerStrategy(strategy_config.get("rsi_bb", {}))
+    trend_name = strategy_config.get("regime_switched", {}).get("trend_strategy", "ema_cross")
+    trending_strategy = _build_trend_strategy(trend_name, strategy_config)
+    regime_filter = _build_regime_filter(strategy_config)
+    return RegimeSwitchedStrategy(trending_strategy, rsi_strategy, regime_filter)
 
 
 def main() -> None:

@@ -46,8 +46,15 @@ A pluggable `Strategy` interface (`bot/strategy/base.py`) plus:
 
 - `ema_cross` — trend-following EMA cross with an ATR trailing stop (spec 7a).
 - `rsi_bb` — RSI/Bollinger mean-reversion, fading extremes back to the midline (spec 7b).
-- `regime_switched` — an ADX-based `RegimeFilter` (spec Section 6) that runs `ema_cross` while
-  "trending" and `rsi_bb` while "ranging", so the bot adapts instead of firing one static rule.
+- `donchian` — trend-following breakout of the prior N-bar high/low channel (spec 7e); the exit
+  (opposite channel boundary) is managed as a trailing stop, the same mechanism as ema_cross's ATR
+  stop, rather than a separate close-only exit path.
+- `regime_switched` — a `RegimeFilter` (spec Section 6) that runs a trend strategy while "trending"
+  and `rsi_bb` while "ranging", so the bot adapts instead of firing one static rule. Which trend
+  strategy (`ema_cross`/`donchian`) and which regime filter (`adx`/`sma200`) are config-driven, not
+  separate `--strategy` choices — see `strategy.regime_switched.trend_strategy` and `strategy.regime.type`
+  in `config/config.yaml`. An independent backtest found `sma200` the stronger risk-adjusted primary
+  switch, with ADX as secondary confirmation (`strategy.regime_sma`) — worth comparing against `adx`.
 
 Indicators (EMA/RSI/Bollinger/ATR/ADX) are hand-implemented in `bot/indicators/` rather than via
 `pandas-ta`/`vectorbt` as the spec's stack table suggests — avoids adding a numba/JIT dependency to
@@ -62,7 +69,7 @@ for iterating on a few strategies over a few years of hourly data without a comp
 python main.py backtest --strategy regime_switched --timeframe 1h --start 2020-01-01T00:00:00Z
 ```
 
-`--strategy` is `ema_cross`, `rsi_bb`, or `regime_switched`. Requires candles already stored via
+`--strategy` is `ema_cross`, `rsi_bb`, `donchian`, or `regime_switched`. Requires candles already stored via
 `backfill`. Prints trade count, total return, max drawdown, Sharpe ratio, win rate, and profit
 factor — fees (0.001, Quidax's real taker fee) and slippage (0.0005) are applied per trade, per
 spec Section 8. Strategy/backtest parameters live under `strategy:`/`backtest:` in
@@ -71,6 +78,13 @@ spec Section 8. Strategy/backtest parameters live under `strategy:`/`backtest:` 
 Per spec Section 8, don't judge a strategy from one date range — rerun `--start`/`--end` across a
 few distinct regimes (e.g. the 2020-21 bull run, the 2022 bear market, a choppy stretch) before
 trusting a result.
+
+Also test on the timeframe the strategy was actually designed for. `ema_cross`/`donchian` are meant
+for 4h/1D (spec 7a) — run at 1h and they overtrade badly: many more small-edge trades compounds
+multiplicatively into a much worse result than the same strategy on daily candles, even with
+correct risk-based position sizing. This isn't a bug, it's what trading that often with that little
+edge actually does to an account — remember to `backfill --timeframe 4h`/`1d` before backtesting
+on them.
 
 ## Deployment
 

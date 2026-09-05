@@ -20,8 +20,16 @@ logging:
 
 strategy:
   regime:
+    type: adx    # adx | sma200 — an independent backtest found sma200 the stronger primary switch (see spec Section 6)
     adx_period: 14
     adx_threshold: 25
+  regime_sma:
+    sma_period: 200
+    band_pct: 0.0     # min distance from SMA(200), as a fraction, to count as "extended" rather than hugging the average
+    adx_period: 14
+    adx_threshold: 20  # looser than regime.adx_threshold — this is secondary confirmation, not the primary call
+  regime_switched:
+    trend_strategy: ema_cross  # ema_cross | donchian
   ema_cross:
     fast_period: 20
     slow_period: 50
@@ -33,6 +41,8 @@ strategy:
     bb_std: 2.0
     rsi_oversold: 30
     rsi_overbought: 70
+  donchian:
+    channel_period: 20
 
 backtest:
   fee: 0.001          # Quidax order-book taker fee
