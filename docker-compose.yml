@@ -1,0 +1,17 @@
+name: btc_trade_bot
+
+services:
+  trade-bot:
+    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
+    container_name: btc_trade_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - trade_bot_data:/app/data
+      - trade_bot_logs:/app/logs
+    command: ["python", "main.py", "poll"]
+
+volumes:
+  trade_bot_data:
+  trade_bot_logs:

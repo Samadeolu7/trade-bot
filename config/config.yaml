@@ -1,0 +1,19 @@
+exchange:
+  id: binance
+  symbol: "BTC/USDT"
+
+backfill:
+  start_date: "2020-01-01T00:00:00Z"
+
+poll:
+  timeframe: "1h"
+  interval_seconds: 60
+
+storage:
+  db_path: "data/trades.db"
+
+logging:
+  level: "INFO"
+  file: "logs/bot.log"
+  max_bytes: 5000000
+  backup_count: 5
