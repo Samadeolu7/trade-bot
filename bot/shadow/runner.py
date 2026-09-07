@@ -78,6 +78,9 @@ def shadow_poll_once(
     # Candle data itself is shared across strategies (same exchange/symbol/
     # timeframe) — only the paper-trading state below is per-strategy.
     backfill_candles(exchange, conn, exchange_id, symbol, timeframe, backfill_start_date, resume=True)
+    # no-op for most strategies; lets e.g. FundingFilteredStrategy refresh
+    # data that isn't part of `df` before generate_signal sees it
+    strategy.before_poll()
 
     df = query_candles_df(conn, exchange_id, symbol, timeframe).tail(
         max(history_bars, strategy.min_lookback + 5)

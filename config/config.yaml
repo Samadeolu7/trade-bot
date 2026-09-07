@@ -59,6 +59,24 @@ strategy:
     retest_tolerance_pct: 0.01  # how close price must come back to the level to count as a retest
     atr_period: 14           # trailing-stop ATR, same mechanism as ema_cross/donchian
     atr_mult: 2.0
+  vol_expansion:
+    bb_period: 20
+    bb_std: 2.0
+    squeeze_lookback: 100     # self-relative, like regime_natr — no fixed universal "tight" threshold
+    squeeze_percentile: 0.2   # width at/below this percentile of its own trailing history counts as squeezed
+    atr_period: 14            # trailing-stop ATR, same mechanism as the other trend strategies
+    atr_mult: 2.0
+  funding_filtered:
+    base_strategy: donchian   # any TREND_STRATEGY_CHOICES entry — the strategy being filtered
+    high_threshold: 0.0005    # veto new longs when funding rate exceeds this (crowded-long risk) — untested guess, sweep it
+    low_threshold: -0.0005    # veto new shorts when funding rate is below this (crowded-short risk)
+
+# Perpetual funding-rate history (spec Section 7d) for funding_filtered —
+# read-only, futures-only data (Binance spot has no funding), unrelated to
+# the OHLCV candles used everywhere else. Quidax execution never sees this.
+funding:
+  exchange_id: binanceusdm
+  symbol: "BTC/USDT:USDT"   # ccxt unified perpetual symbol
 
 backtest:
   fee: 0.001          # Quidax order-book taker fee

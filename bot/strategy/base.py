@@ -50,6 +50,15 @@ class Strategy(ABC):
         the result must only ever move in the position's favor."""
         return current_stop
 
+    def before_poll(self) -> None:
+        """Optional hook the shadow runner calls once per live iteration,
+        before generate_signal — for strategies that need to refresh
+        external state that isn't part of `df` itself (e.g.
+        FundingFilteredStrategy re-backfilling funding rates). No-op by
+        default. The backtest engine never calls this: entry_signals/
+        generate_signal there only ever see the fixed historical df."""
+        return None
+
     def entry_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         """Vectorized equivalent of generate_signal: for every bar in df,
         would this strategy open a position there? Returns a frame aligned to

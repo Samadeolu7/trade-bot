@@ -81,6 +81,21 @@ CREATE TABLE IF NOT EXISTS paper_trades (
 )
 """
 
+# Perpetual-futures funding rate history (spec Section 7d) — a candidate
+# confirmation/veto input for FundingFilteredStrategy, fetched read-only from
+# Binance's USD-M futures market (funding is a futures concept; Quidax spot
+# execution never sees it). Kept in its own table/exchange identity since
+# it's unrelated to (and prints far less often than) OHLCV candles.
+CREATE_FUNDING_RATES_TABLE = """
+CREATE TABLE IF NOT EXISTS funding_rates (
+    exchange TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    funding_time INTEGER NOT NULL,
+    funding_rate REAL NOT NULL,
+    UNIQUE(exchange, symbol, funding_time)
+)
+"""
+
 # Tiny key-value store for scheduling bookkeeping (e.g. "last heartbeat sent
 # at") that needs to survive process restarts. Keyed by the caller (e.g.
 # f"{strategy_label}:last_heartbeat_at") so concurrent shadow runs don't
@@ -124,6 +139,7 @@ def connect(db_path: str = "data/trades.db") -> sqlite3.Connection:
     conn.execute(CREATE_SIGNALS_TABLE)
     conn.execute(CREATE_PAPER_POSITION_TABLE)
     conn.execute(CREATE_PAPER_TRADES_TABLE)
+    conn.execute(CREATE_FUNDING_RATES_TABLE)
     conn.execute(CREATE_BOT_STATE_TABLE)
     conn.commit()
     return conn
@@ -178,8 +194,58 @@ def query_candles_df(
         conn,
         params=(exchange, symbol, timeframe),
     )
-    df["open_time"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
+    # explicit ns resolution: pandas 2.x+ preserves to_datetime(unit="ms")'s
+    # native ms resolution instead of upcasting, and (as of pandas 3.0)
+    # comparing a ms-resolution index against a plain pd.Timestamp(...)
+    # elsewhere in the codebase raises instead of coercing — normalize here,
+    # once, at the source, rather than at every comparison call site.
+    df["open_time"] = pd.to_datetime(df["open_time"], unit="ms", utc=True).astype("datetime64[ns, UTC]")
     return df.set_index("open_time")
+
+
+def upsert_funding_rates(
+    conn: sqlite3.Connection, exchange: str, symbol: str, rates: list[dict]
+) -> int:
+    """rates: ccxt fetchFundingRateHistory entries — dicts with 'timestamp'
+    (epoch ms) and 'fundingRate' keys."""
+    if not rates:
+        return 0
+    rows = [(exchange, symbol, r["timestamp"], r["fundingRate"]) for r in rates]
+    conn.executemany(
+        """
+        INSERT OR REPLACE INTO funding_rates (exchange, symbol, funding_time, funding_rate)
+        VALUES (?, ?, ?, ?)
+        """,
+        rows,
+    )
+    conn.commit()
+    return len(rows)
+
+
+def get_latest_funding_time(conn: sqlite3.Connection, exchange: str, symbol: str) -> int | None:
+    cur = conn.execute(
+        "SELECT MAX(funding_time) FROM funding_rates WHERE exchange = ? AND symbol = ?",
+        (exchange, symbol),
+    )
+    row = cur.fetchone()
+    return row[0] if row and row[0] is not None else None
+
+
+def query_funding_rates_df(conn: sqlite3.Connection, exchange: str, symbol: str) -> pd.DataFrame:
+    df = pd.read_sql_query(
+        """
+        SELECT funding_time, funding_rate FROM funding_rates
+        WHERE exchange = ? AND symbol = ?
+        ORDER BY funding_time ASC
+        """,
+        conn,
+        params=(exchange, symbol),
+    )
+    # see query_candles_df — same ms-vs-ns resolution fix
+    df["funding_time"] = pd.to_datetime(df["funding_time"], unit="ms", utc=True).astype(
+        "datetime64[ns, UTC]"
+    )
+    return df.set_index("funding_time")
 
 
 def _to_epoch_ms(timestamp) -> int:

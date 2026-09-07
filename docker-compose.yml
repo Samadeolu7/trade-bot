@@ -43,6 +43,35 @@ services:
       - trade_bot_logs:/app/logs
     command: ["python", "main.py", "shadow", "--strategy", "regime_switched", "--strategy-label", "donchian_natr_regime", "--regime-type", "natr"]
 
+  # Concurrent candidate #4: volatility-expansion breakout, standalone (not
+  # behind a regime filter) — a distinct entry hypothesis from donchian's
+  # plain price-channel breakout, see bot/strategy/vol_expansion.py.
+  trade-bot-vol-expansion:
+    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
+    container_name: btc_trade_bot_vol_expansion
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - trade_bot_data:/app/data
+      - trade_bot_logs:/app/logs
+    command: ["python", "main.py", "shadow", "--strategy", "vol_expansion", "--strategy-label", "vol_expansion"]
+
+  # Concurrent candidate #5: donchian trend, filtered by Binance perpetual
+  # funding-rate extremes (crowded-long/short veto) — see
+  # bot/strategy/funding_filter.py. Needs read-only egress to Binance's
+  # USD-M futures API in addition to spot, for funding-rate history only.
+  trade-bot-funding-filtered:
+    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
+    container_name: btc_trade_bot_funding_filtered
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - trade_bot_data:/app/data
+      - trade_bot_logs:/app/logs
+    command: ["python", "main.py", "shadow", "--strategy", "funding_filtered", "--strategy-label", "donchian_funding_filtered"]
+
 volumes:
   trade_bot_data:
   trade_bot_logs:

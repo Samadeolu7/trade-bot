@@ -347,3 +347,53 @@ signal has fired yet on any of them). Concurrent, independently-labeled
 shadow runs are working end-to-end in production, not just in tests.
 Deleted the temporary `verify-concurrent-shadow.yml` workflow now that
 this is confirmed directly rather than via the SSH check.
+
+## Remaining shortlist candidates built (2026-09-07)
+
+User said to go ahead with the two remaining candidates from the original
+five-strategy shortlist, now that concurrent infrastructure is confirmed
+working. Both implemented, tested, and added as a fourth and fifth
+concurrent shadow-run service — no backtest verdict logged for either yet;
+per the "testing hypotheses is cheap now" approach, they're going straight
+to live shadow-testing rather than waiting on an offline backtest first,
+same treatment multi_timeframe/donchian_natr_regime already got.
+
+- **`VolatilityExpansionBreakoutStrategy`** (`bot/strategy/vol_expansion.py`,
+  spec 7c): Bollinger Band width squeeze (self-relative rolling percentile,
+  same idiom as `NatrRegimeFilter`) followed by expansion and a breakout of
+  the *prior* bar's band edge — comparing against the same bar's own band
+  would let one extreme close pull that band wide enough to contain itself,
+  hiding the breakout. Deployed standalone (no regime filter) as
+  `vol_expansion`.
+- **`FundingFilteredStrategy`** (`bot/strategy/funding_filter.py`, spec 7d):
+  wraps a base trend strategy (default donchian) with a Binance perpetual
+  funding-rate veto — suppresses a long when funding is crowded long, a
+  short when crowded short. Required a new data source: funding rates are a
+  futures-only concept, absent from the spot client used for candles, so
+  added a separate `binanceusdm` exchange client, a `funding_rates` DB
+  table, and `bot/data/funding_backfill.py` (same paginate-and-upsert shape
+  as candle backfill). Added `Strategy.before_poll()` — a no-op hook for
+  every other strategy — so live shadow runs can refresh funding data every
+  iteration; backtests just pass a fixed funding history for the window.
+  Deployed as `donchian_funding_filtered`.
+- `main.py`'s `shadow`/`backtest`/`sweep` commands all gained
+  `--funding-base-strategy`/`--funding-high-threshold`/
+  `--funding-low-threshold` overrides, mirroring the existing
+  regime_switched/donchian override pattern. `docker-compose.yml` now runs
+  five concurrent shadow services total.
+
+**Bug found and fixed while validating these** (pre-existing, unrelated to
+the new strategies): `main.py`'s `--start`/`--end` filtering and the
+holdout guard compared a tz-naive `pd.Timestamp(args.start)` against the
+tz-aware candle index, and separately a ms-resolution index (from
+`pd.to_datetime(..., unit="ms")`) against timestamps of other resolutions —
+both silently tolerated by older pandas, both now hard errors on pandas
+3.0+. Since `requirements.txt` pins no pandas version, this would break
+every `backtest`/`sweep` invocation (not the live `shadow` command, which
+never hits this comparison path) on any fresh install. Fixed by
+constructing comparison timestamps as `pd.Timestamp(x, tz="UTC")`
+everywhere and normalizing `query_candles_df`/`query_funding_rates_df`'s
+datetime columns to `datetime64[ns, UTC]` at the source. Found because this
+sandbox's fresh pip install picked up pandas 3.0.5 and `backtest`/`sweep`
+failed immediately on any real query — worth being aware this may also
+affect your own local environment depending on installed pandas version.

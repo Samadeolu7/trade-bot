@@ -12,26 +12,33 @@ from bot.backtest.metrics import breakdown_by_strategy, summarize
 from bot.config import load_config
 from bot.data.backfill import backfill_candles
 from bot.data.exchange import create_exchange
+from bot.data.funding import create_funding_exchange
+from bot.data.funding_backfill import backfill_funding_rates
 from bot.data.poll import run_poll_loop
 from bot.logging_setup import configure_logging
 from bot.shadow.runner import run_shadow_loop
-from bot.storage.db import connect, query_candles_df
+from bot.storage.db import connect, query_candles_df, query_funding_rates_df
 from bot.strategy.donchian import DonchianBreakoutStrategy
 from bot.strategy.ema_cross import EmaCrossStrategy
 from bot.strategy.flat import FlatStrategy
+from bot.strategy.funding_filter import FundingFilteredStrategy
 from bot.strategy.market_structure import MarketStructureBreakoutStrategy
 from bot.strategy.multi_timeframe import MultiTimeframeTrendPullbackStrategy
 from bot.strategy.regime import NatrRegimeFilter, RegimeFilter, Sma200RegimeFilter
 from bot.strategy.regime_switch import RegimeSwitchedStrategy
 from bot.strategy.rsi_bb import RsiBollingerStrategy
+from bot.strategy.vol_expansion import VolatilityExpansionBreakoutStrategy
 from bot.strategy.base import Strategy
 
 logger = logging.getLogger(__name__)
 
 STRATEGY_CHOICES = [
-    "ema_cross", "rsi_bb", "donchian", "market_structure", "multi_timeframe", "regime_switched",
+    "ema_cross", "rsi_bb", "donchian", "market_structure", "multi_timeframe", "vol_expansion",
+    "funding_filtered", "regime_switched",
 ]
-TREND_STRATEGY_CHOICES = ["ema_cross", "donchian", "market_structure", "multi_timeframe"]
+TREND_STRATEGY_CHOICES = [
+    "ema_cross", "donchian", "market_structure", "multi_timeframe", "vol_expansion",
+]
 
 
 def _build_trend_strategy(name: str, strategy_config: dict) -> Strategy:
@@ -41,7 +48,29 @@ def _build_trend_strategy(name: str, strategy_config: dict) -> Strategy:
         return MarketStructureBreakoutStrategy(strategy_config.get("market_structure", {}))
     if name == "multi_timeframe":
         return MultiTimeframeTrendPullbackStrategy(strategy_config.get("multi_timeframe", {}))
+    if name == "vol_expansion":
+        return VolatilityExpansionBreakoutStrategy(strategy_config.get("vol_expansion", {}))
     return EmaCrossStrategy(strategy_config.get("ema_cross", {}))
+
+
+def _empty_funding_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        {"funding_rate": []}, index=pd.DatetimeIndex([], tz="UTC", name="funding_time")
+    )
+
+
+def _load_funding_df(config: dict, conn) -> pd.DataFrame:
+    """Backfills (resume=True — cheap no-op if already caught up) then reads
+    back funding-rate history from its own exchange identity (funding is a
+    perpetual-futures concept, unavailable on the spot client used for
+    candles)."""
+    funding_config = config.get("funding", {})
+    exchange_id = funding_config.get("exchange_id", "binanceusdm")
+    symbol = funding_config.get("symbol", "BTC/USDT:USDT")
+    start_date = funding_config.get("start_date", config["backfill"]["start_date"])
+    funding_exchange = create_funding_exchange(exchange_id)
+    backfill_funding_rates(funding_exchange, conn, exchange_id, symbol, start_date, resume=True)
+    return query_funding_rates_df(conn, exchange_id, symbol)
 
 
 def _build_ranging_strategy(name: str, strategy_config: dict) -> Strategy:
@@ -88,9 +117,14 @@ def parse_param_arg(arg: str) -> tuple[str, str, list]:
 
 
 def _run_backtest_once(
-    df: pd.DataFrame, strategy_name: str, strategy_config: dict, backtest_config: dict, timeframe: str
+    df: pd.DataFrame,
+    strategy_name: str,
+    strategy_config: dict,
+    backtest_config: dict,
+    timeframe: str,
+    funding_df: pd.DataFrame | None = None,
 ) -> dict:
-    strategy = _build_strategy(strategy_name, strategy_config)
+    strategy = _build_strategy(strategy_name, strategy_config, funding_df=funding_df)
     result = run_backtest(
         df,
         strategy,
@@ -125,7 +159,7 @@ def apply_holdout_guard(
     data doesn't reach it anyway."""
     if not holdout_start or len(df) == 0:
         return df, False
-    holdout_ts = pd.Timestamp(holdout_start)
+    holdout_ts = pd.Timestamp(holdout_start, tz="UTC")
     if df.index.max() < holdout_ts:
         return df, False
     if not allow_holdout:
@@ -157,7 +191,12 @@ def log_holdout_validation(
         f.write(f"- result: {summary}\n")
 
 
-def _build_strategy(name: str, strategy_config: dict) -> Strategy:
+def _build_strategy(
+    name: str,
+    strategy_config: dict,
+    funding_df: pd.DataFrame | None = None,
+    funding_refresh_fn=None,
+) -> Strategy:
     if name == "ema_cross":
         return EmaCrossStrategy(strategy_config.get("ema_cross", {}))
     if name == "rsi_bb":
@@ -168,6 +207,26 @@ def _build_strategy(name: str, strategy_config: dict) -> Strategy:
         return MarketStructureBreakoutStrategy(strategy_config.get("market_structure", {}))
     if name == "multi_timeframe":
         return MultiTimeframeTrendPullbackStrategy(strategy_config.get("multi_timeframe", {}))
+    if name == "vol_expansion":
+        return VolatilityExpansionBreakoutStrategy(strategy_config.get("vol_expansion", {}))
+    if name == "funding_filtered":
+        # base_strategy/high_threshold/low_threshold are config-driven (same
+        # pattern as regime_switched's trend_strategy), not separate
+        # --strategy choices — funding_df/funding_refresh_fn come from the
+        # caller since building them needs a DB connection this function
+        # doesn't otherwise take.
+        funding_filtered_config = strategy_config.get("funding_filtered", {})
+        base_name = funding_filtered_config.get("base_strategy", "donchian")
+        base = _build_trend_strategy(base_name, strategy_config)
+        high_threshold = funding_filtered_config.get("high_threshold", 0.0005)
+        low_threshold = funding_filtered_config.get("low_threshold", -0.0005)
+        return FundingFilteredStrategy(
+            base,
+            funding_df if funding_df is not None else _empty_funding_df(),
+            high_threshold,
+            low_threshold,
+            refresh_fn=funding_refresh_fn,
+        )
 
     # regime_switched: trend/ranging sub-strategies and regime-filter type are
     # config-driven (spec Section 1), not separate --strategy choices, so
@@ -269,6 +328,26 @@ def main() -> None:
     )
     backtest_parser.add_argument(
         "--stop-band-mult", type=float, default=None, help="overrides strategy.rsi_bb.stop_band_mult"
+    )
+    backtest_parser.add_argument(
+        "--funding-base-strategy",
+        choices=TREND_STRATEGY_CHOICES,
+        default=None,
+        help="only for --strategy funding_filtered: overrides strategy.funding_filtered.base_strategy",
+    )
+    backtest_parser.add_argument(
+        "--funding-high-threshold",
+        type=float,
+        default=None,
+        help="only for --strategy funding_filtered: overrides strategy.funding_filtered.high_threshold "
+        "(veto new longs when funding rate exceeds this)",
+    )
+    backtest_parser.add_argument(
+        "--funding-low-threshold",
+        type=float,
+        default=None,
+        help="only for --strategy funding_filtered: overrides strategy.funding_filtered.low_threshold "
+        "(veto new shorts when funding rate is below this)",
     )
     backtest_parser.add_argument(
         "--allow-holdout",
@@ -386,6 +465,24 @@ def main() -> None:
         default=None,
         help="donchian with --exit-method atr: overrides strategy.donchian.atr_mult",
     )
+    shadow_parser.add_argument(
+        "--funding-base-strategy",
+        choices=TREND_STRATEGY_CHOICES,
+        default=None,
+        help="only for --strategy funding_filtered: overrides strategy.funding_filtered.base_strategy",
+    )
+    shadow_parser.add_argument(
+        "--funding-high-threshold",
+        type=float,
+        default=None,
+        help="only for --strategy funding_filtered: overrides strategy.funding_filtered.high_threshold",
+    )
+    shadow_parser.add_argument(
+        "--funding-low-threshold",
+        type=float,
+        default=None,
+        help="only for --strategy funding_filtered: overrides strategy.funding_filtered.low_threshold",
+    )
 
     args = parser.parse_args()
 
@@ -413,9 +510,9 @@ def main() -> None:
     elif args.command == "backtest":
         df = query_candles_df(conn, exchange_id, symbol, args.timeframe)
         if args.start:
-            df = df[df.index >= pd.Timestamp(args.start)]
+            df = df[df.index >= pd.Timestamp(args.start, tz="UTC")]
         if args.end:
-            df = df[df.index <= pd.Timestamp(args.end)]
+            df = df[df.index <= pd.Timestamp(args.end, tz="UTC")]
 
         holdout_start = config.get("validation", {}).get("holdout_start")
         df, touched_holdout = apply_holdout_guard(
@@ -450,8 +547,20 @@ def main() -> None:
         strategy_config = _with_override(
             strategy_config, "rsi_bb", "stop_band_mult", args.stop_band_mult
         )
+        strategy_config = _with_override(
+            strategy_config, "funding_filtered", "base_strategy", args.funding_base_strategy
+        )
+        strategy_config = _with_override(
+            strategy_config, "funding_filtered", "high_threshold", args.funding_high_threshold
+        )
+        strategy_config = _with_override(
+            strategy_config, "funding_filtered", "low_threshold", args.funding_low_threshold
+        )
 
-        summary = _run_backtest_once(df, args.strategy, strategy_config, backtest_config, args.timeframe)
+        funding_df = _load_funding_df(config, conn) if args.strategy == "funding_filtered" else None
+        summary = _run_backtest_once(
+            df, args.strategy, strategy_config, backtest_config, args.timeframe, funding_df
+        )
 
         logger.info(
             "backtest complete: %s %s %s over %d candles -> %s",
@@ -466,9 +575,9 @@ def main() -> None:
     elif args.command == "sweep":
         df = query_candles_df(conn, exchange_id, symbol, args.timeframe)
         if args.start:
-            df = df[df.index >= pd.Timestamp(args.start)]
+            df = df[df.index >= pd.Timestamp(args.start, tz="UTC")]
         if args.end:
-            df = df[df.index <= pd.Timestamp(args.end)]
+            df = df[df.index <= pd.Timestamp(args.end, tz="UTC")]
 
         # sweep never gets holdout access, no override flag — a grid search
         # is exploration/tuning by definition, exactly what the reserved
@@ -487,6 +596,11 @@ def main() -> None:
         )
         base_strategy_config = _with_override(base_strategy_config, "regime", "type", args.regime_type)
 
+        # loaded once up front (not per combo) — funding history doesn't
+        # depend on any strategy parameter being swept; sweep thresholds
+        # themselves via --param funding_filtered.high_threshold=v1,v2,...
+        funding_df = _load_funding_df(config, conn) if args.strategy == "funding_filtered" else None
+
         grid = [parse_param_arg(p) for p in args.param]
         sections_keys = [(section, key) for section, key, _ in grid]
         value_lists = [values for _, _, values in grid]
@@ -499,7 +613,7 @@ def main() -> None:
                 strategy_config = _with_override(strategy_config, section, key, value)
 
             summary = _run_backtest_once(
-                df, args.strategy, strategy_config, backtest_config, args.timeframe
+                df, args.strategy, strategy_config, backtest_config, args.timeframe, funding_df
             )
             params_label = ", ".join(f"{s}.{k}={v}" for (s, k), v in zip(sections_keys, combo))
             rows.append((params_label or "(defaults)", summary))
@@ -538,8 +652,28 @@ def main() -> None:
         strategy_config = _with_override(
             strategy_config, "donchian", "atr_mult", args.donchian_atr_mult
         )
+        strategy_config = _with_override(
+            strategy_config, "funding_filtered", "base_strategy", args.funding_base_strategy
+        )
+        strategy_config = _with_override(
+            strategy_config, "funding_filtered", "high_threshold", args.funding_high_threshold
+        )
+        strategy_config = _with_override(
+            strategy_config, "funding_filtered", "low_threshold", args.funding_low_threshold
+        )
 
-        strategy = _build_strategy(args.strategy, strategy_config)
+        funding_df = None
+        funding_refresh_fn = None
+        if args.strategy == "funding_filtered":
+            funding_df = _load_funding_df(config, conn)
+            # live shadow runs need fresh funding data (~every 8h) —
+            # backtests/sweeps get a fixed funding_df for the whole
+            # historical window and pass no refresh_fn
+            funding_refresh_fn = lambda: _load_funding_df(config, conn)  # noqa: E731
+
+        strategy = _build_strategy(
+            args.strategy, strategy_config, funding_df=funding_df, funding_refresh_fn=funding_refresh_fn
+        )
 
         alerter = TelegramAlerter(
             os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
