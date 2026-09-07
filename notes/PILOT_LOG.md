@@ -397,3 +397,13 @@ datetime columns to `datetime64[ns, UTC]` at the source. Found because this
 sandbox's fresh pip install picked up pandas 3.0.5 and `backtest`/`sweep`
 failed immediately on any real query — worth being aware this may also
 affect your own local environment depending on installed pandas version.
+
+**Confirmed live (2026-09-07, ~07:47 UTC)**: user forwarded Telegram output
+showing `vol_expansion` and `donchian_funding_filtered` both posting
+correctly-labeled DAILY_SUMMARY/HEARTBEAT messages, `position=flat
+trades_all_time=0` as expected right after deploy. All five concurrent
+shadow-run candidates from the original shortlist — `donchian_adx_control`,
+`donchian_natr_regime`, `multi_timeframe`, `vol_expansion`,
+`donchian_funding_filtered` — are now confirmed running independently in
+production. This closes out the shortlist; next open question is what to
+build once these have gathered enough live data to compare.
