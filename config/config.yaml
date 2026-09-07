@@ -20,7 +20,7 @@ logging:
 
 strategy:
   regime:
-    type: adx    # adx | sma200 — an independent backtest found sma200 the stronger primary switch (see spec Section 6)
+    type: adx    # adx | sma200 | natr — an independent backtest found sma200 the stronger primary switch (see spec Section 6); natr is an untested candidate (Section 8)
     adx_period: 14
     adx_threshold: 25
   regime_sma:
@@ -28,6 +28,10 @@ strategy:
     band_pct: 0.0     # min distance from SMA(200), as a fraction, to count as "extended" rather than hugging the average
     adx_period: 14
     adx_threshold: 20  # looser than regime.adx_threshold — this is secondary confirmation, not the primary call
+  regime_natr:
+    atr_period: 14
+    lookback: 100       # rolling window NATR is compared against — self-relative, not a fixed universal threshold
+    percentile: 0.5     # "trending" when NATR >= its own trailing-lookback median; raise for a stricter volatility-expansion bar
   regime_switched:
     trend_strategy: donchian  # ema_cross | donchian — donchian is the only one with a validated (if still unconfirmed) edge so far
     ranging_strategy: flat    # flat | rsi_bb — flat is the default per spec Section 8 pilot findings; rsi_bb remains opt-in

@@ -19,7 +19,7 @@ from bot.storage.db import connect, query_candles_df
 from bot.strategy.donchian import DonchianBreakoutStrategy
 from bot.strategy.ema_cross import EmaCrossStrategy
 from bot.strategy.flat import FlatStrategy
-from bot.strategy.regime import RegimeFilter, Sma200RegimeFilter
+from bot.strategy.regime import NatrRegimeFilter, RegimeFilter, Sma200RegimeFilter
 from bot.strategy.regime_switch import RegimeSwitchedStrategy
 from bot.strategy.rsi_bb import RsiBollingerStrategy
 from bot.strategy.base import Strategy
@@ -43,8 +43,11 @@ def _build_ranging_strategy(name: str, strategy_config: dict) -> Strategy:
 
 def _build_regime_filter(strategy_config: dict):
     regime_config = strategy_config.get("regime", {})
-    if regime_config.get("type", "adx") == "sma200":
+    regime_type = regime_config.get("type", "adx")
+    if regime_type == "sma200":
         return Sma200RegimeFilter(**strategy_config.get("regime_sma", {}))
+    if regime_type == "natr":
+        return NatrRegimeFilter(**strategy_config.get("regime_natr", {}))
     return RegimeFilter(
         adx_period=regime_config.get("adx_period", 14),
         adx_threshold=regime_config.get("adx_threshold", 25),
@@ -213,7 +216,7 @@ def main() -> None:
     )
     backtest_parser.add_argument(
         "--regime-type",
-        choices=["adx", "sma200"],
+        choices=["adx", "sma200", "natr"],
         default=None,
         help="only for --strategy regime_switched: overrides strategy.regime.type",
     )
@@ -286,7 +289,7 @@ def main() -> None:
     )
     sweep_parser.add_argument(
         "--regime-type",
-        choices=["adx", "sma200"],
+        choices=["adx", "sma200", "natr"],
         default=None,
         help="only for --strategy regime_switched: overrides strategy.regime.type for every "
         "combination in the sweep",

@@ -3,7 +3,7 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
-from bot.indicators.indicators import adx
+from bot.indicators.indicators import adx, atr
 
 Regime = Literal["trending", "ranging"]
 
@@ -80,4 +80,43 @@ class Sma200RegimeFilter:
         valid = sma.notna() & adx_val.notna()
 
         labels = np.where(trending, "trending", "ranging")
+        return pd.Series(np.where(valid, labels, None), index=df.index)
+
+
+class NatrRegimeFilter:
+    """Volatility-regime filter, as a candidate alternative primary switch to
+    ADX/SMA(200): normalized ATR (ATR / close) relative to its own recent
+    (`lookback`-bar) history, not a fixed universal threshold — a given NATR
+    value means very different things at different price levels/assets, so
+    self-relative comparison is what generalizes.
+
+    "Trending" when NATR sits at or above its own `percentile` over the
+    trailing `lookback` bars — the premise (spec 7c) being that BTC moves in
+    volatility clusters, so an expansion in normalized range often
+    accompanies the kind of move a trend-following sub-strategy is meant to
+    catch, while compression usually means chop. This is a different axis
+    from ADX/SMA200 (trend *strength*/*extension*) — it measures volatility
+    *expansion* instead, and is untested against real data; log any backtest
+    findings in spec Section 8 like the other regime filters."""
+
+    def __init__(self, atr_period: int = 14, lookback: int = 100, percentile: float = 0.5):
+        self.atr_period = atr_period
+        self.lookback = lookback
+        self.percentile = percentile
+        # ATR needs its own warm-up (Wilder smoothing), then `lookback` more
+        # bars so the rolling percentile at the last row is based on mostly
+        # settled NATR values, not still-warming-up ones.
+        self.min_lookback = atr_period * 3 + lookback
+
+    def regime(self, df: pd.DataFrame) -> Regime | None:
+        series = self.regime_series(df)
+        return series.iloc[-1] if len(series) else None
+
+    def regime_series(self, df: pd.DataFrame) -> pd.Series:
+        atr_val = atr(df["high"], df["low"], df["close"], period=self.atr_period)
+        natr = atr_val / df["close"]
+        threshold = natr.rolling(self.lookback).quantile(self.percentile)
+
+        labels = np.where(natr >= threshold, "trending", "ranging")
+        valid = natr.notna() & threshold.notna()
         return pd.Series(np.where(valid, labels, None), index=df.index)
