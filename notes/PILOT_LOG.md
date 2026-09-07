@@ -238,3 +238,34 @@ did, and the new token is what's now confirmed working.
 **Not touched, as instructed:** no Quidax client, no API key (real or
 placeholder beyond the pre-existing `.env.example` entry), no order-placement
 code path. Phase 5 is untouched and gated behind you being present.
+
+---
+
+## Post-deployment: backtesting hygiene + new candidates (2026-09-07)
+
+Separate stretch of work, still strictly Phase 2/3.5 research — the deployed
+Phase 4 shadow-run strategy (`regime_switched`: donchian trend, flat ranging,
+ADX filter) is untouched by any of this.
+
+- **Holdout enforcement**: found our own "out-of-sample" test wasn't actually
+  clean (the donchian exit-width exploration overlapped the later holdout
+  window). Added `validation.holdout_start` in config.yaml — `sweep` can
+  never touch it, `backtest` needs `--allow-holdout` (logged to
+  `notes/holdout_validations.md`). Full detail in spec Section 8.
+- **Two new untested candidates**, from the user's own roadmap brainstorm,
+  fully implemented and tested (not deployed — plugged in as opt-in
+  `--strategy`/`--trend-strategy`/`--regime-type` choices only):
+  - `NatrRegimeFilter` (`regime.type: natr`) — volatility-expansion regime
+    filter, self-relative (trailing-percentile), a different axis from
+    ADX/SMA200's trend-strength.
+  - `MarketStructureBreakoutStrategy` (`--strategy market_structure`) —
+    swing high/low, break, retest, confirm. A genuinely different entry
+    hypothesis from every indicator-based strategy already here.
+- Paused here rather than continuing to the roadmap's remaining Tier-1 items
+  (multi-timeframe trend+pullback, a 3-way regime composite) — those are
+  bigger design decisions (multi-timeframe needs either an interface change
+  or in-strategy resampling; the 3-way composite needs a real decision on
+  how "expansion" gets defined from the existing filters) worth a judgment
+  call together rather than guessing solo, and the two new candidates above
+  need real backtest results before it's clear whether stacking more
+  untested strategies on top is the right next move at all.
