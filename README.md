@@ -55,15 +55,25 @@ A pluggable `Strategy` interface (`bot/strategy/base.py`) plus:
   the exit channel width and exit method are free parameters to sweep (`--exit-channel-period`,
   `--exit-method`, `--donchian-atr-period`, `--donchian-atr-mult`), not values to anchor on because
   they sound familiar from a well-known system.
+- `market_structure` — swing high/low, break of that level, retest, then enter on confirmed
+  rejection/continuation (untested candidate — see spec Section 8). Deliberately a different entry
+  hypothesis from the others: they all ask "what do the indicators say," this asks "what is price
+  actually doing." Uses only the most recent confirmed swing point per direction, not every
+  unresolved one — simpler as a first version, at the cost of possibly missing an older level's
+  still-live cycle. No vectorized `entry_signals` (falls back to the base class's per-bar replay) —
+  this pattern is inherently sequential in a way that's easy to hand-vectorize incorrectly, and
+  correctness matters more here than backtest speed at this data scale.
 - `regime_switched` — a `RegimeFilter` (spec Section 6) that runs a trend strategy while "trending"
   and `rsi_bb` while "ranging", so the bot adapts instead of firing one static rule. Which trend
-  strategy (`ema_cross`/`donchian`) and which regime filter (`adx`/`sma200`) are config-driven
-  (`strategy.regime_switched.trend_strategy`, `strategy.regime.type` in `config/config.yaml`), with
-  `--trend-strategy`/`--regime-type` as one-off CLI overrides for comparing combos without editing
-  the file baked into the Docker image. An independent backtest found `sma200` the stronger
-  risk-adjusted primary switch, with ADX as secondary confirmation (`strategy.regime_sma`) — worth
-  comparing against `adx`. `rsi_bb`'s own `--rsi-oversold`/`--rsi-overbought`/`--bb-std`/
-  `--stop-band-mult` are also CLI-overridable, for the same reason.
+  strategy (`ema_cross`/`donchian`/`market_structure`) and which regime filter (`adx`/`sma200`/`natr`)
+  are config-driven (`strategy.regime_switched.trend_strategy`, `strategy.regime.type` in
+  `config/config.yaml`), with `--trend-strategy`/`--regime-type` as one-off CLI overrides for
+  comparing combos without editing the file baked into the Docker image. An independent backtest
+  found `sma200` the stronger risk-adjusted primary switch over plain `adx`, with ADX as secondary
+  confirmation (`strategy.regime_sma`); `natr` (normalized ATR vs. its own trailing history —
+  volatility *expansion*, a different axis from trend *strength*/*extension*) is a newer, untested
+  candidate. `rsi_bb`'s own `--rsi-oversold`/`--rsi-overbought`/`--bb-std`/`--stop-band-mult` are
+  also CLI-overridable, for the same reason.
 
 `regime_switched` results include a `by_strategy` breakdown (trade count/win rate/profit factor/
 total pnl per sub-strategy) whenever more than one fired. This is what actually tells you whether

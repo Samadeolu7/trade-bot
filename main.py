@@ -19,6 +19,7 @@ from bot.storage.db import connect, query_candles_df
 from bot.strategy.donchian import DonchianBreakoutStrategy
 from bot.strategy.ema_cross import EmaCrossStrategy
 from bot.strategy.flat import FlatStrategy
+from bot.strategy.market_structure import MarketStructureBreakoutStrategy
 from bot.strategy.regime import NatrRegimeFilter, RegimeFilter, Sma200RegimeFilter
 from bot.strategy.regime_switch import RegimeSwitchedStrategy
 from bot.strategy.rsi_bb import RsiBollingerStrategy
@@ -26,12 +27,15 @@ from bot.strategy.base import Strategy
 
 logger = logging.getLogger(__name__)
 
-STRATEGY_CHOICES = ["ema_cross", "rsi_bb", "donchian", "regime_switched"]
+STRATEGY_CHOICES = ["ema_cross", "rsi_bb", "donchian", "market_structure", "regime_switched"]
+TREND_STRATEGY_CHOICES = ["ema_cross", "donchian", "market_structure"]
 
 
 def _build_trend_strategy(name: str, strategy_config: dict) -> Strategy:
     if name == "donchian":
         return DonchianBreakoutStrategy(strategy_config.get("donchian", {}))
+    if name == "market_structure":
+        return MarketStructureBreakoutStrategy(strategy_config.get("market_structure", {}))
     return EmaCrossStrategy(strategy_config.get("ema_cross", {}))
 
 
@@ -155,6 +159,8 @@ def _build_strategy(name: str, strategy_config: dict) -> Strategy:
         return RsiBollingerStrategy(strategy_config.get("rsi_bb", {}))
     if name == "donchian":
         return DonchianBreakoutStrategy(strategy_config.get("donchian", {}))
+    if name == "market_structure":
+        return MarketStructureBreakoutStrategy(strategy_config.get("market_structure", {}))
 
     # regime_switched: trend/ranging sub-strategies and regime-filter type are
     # config-driven (spec Section 1), not separate --strategy choices, so
@@ -204,7 +210,7 @@ def main() -> None:
     backtest_parser.add_argument("--end", default=None, help="ISO8601, restricts the backtest window")
     backtest_parser.add_argument(
         "--trend-strategy",
-        choices=["ema_cross", "donchian"],
+        choices=TREND_STRATEGY_CHOICES,
         default=None,
         help="only for --strategy regime_switched: overrides strategy.regime_switched.trend_strategy",
     )
@@ -275,7 +281,7 @@ def main() -> None:
     sweep_parser.add_argument("--end", default=None, help="ISO8601, restricts the backtest window")
     sweep_parser.add_argument(
         "--trend-strategy",
-        choices=["ema_cross", "donchian"],
+        choices=TREND_STRATEGY_CHOICES,
         default=None,
         help="only for --strategy regime_switched: overrides strategy.regime_switched.trend_strategy "
         "for every combination in the sweep (use --param if you want to sweep this too)",

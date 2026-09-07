@@ -33,7 +33,7 @@ strategy:
     lookback: 100       # rolling window NATR is compared against — self-relative, not a fixed universal threshold
     percentile: 0.5     # "trending" when NATR >= its own trailing-lookback median; raise for a stricter volatility-expansion bar
   regime_switched:
-    trend_strategy: donchian  # ema_cross | donchian — donchian is the only one with a validated (if still unconfirmed) edge so far
+    trend_strategy: donchian  # ema_cross | donchian | market_structure — donchian is the only one with a validated (if still unconfirmed) edge so far; market_structure is untested
     ranging_strategy: flat    # flat | rsi_bb — flat is the default per spec Section 8 pilot findings; rsi_bb remains opt-in
   ema_cross:
     fast_period: 20
@@ -53,6 +53,12 @@ strategy:
     exit_channel_period: 55  # channel exit only; longer than entry so normal pullbacks don't chop the position out mid-trend — a free parameter, not a settled value, sweep it
     atr_period: 14        # atr exit only
     atr_mult: 2.0         # atr exit only
+  market_structure:
+    swing_window: 5          # bars on each side to confirm a fractal swing high/low
+    retest_window: 10        # max bars after a breakout to accept a retest of the broken level
+    retest_tolerance_pct: 0.01  # how close price must come back to the level to count as a retest
+    atr_period: 14           # trailing-stop ATR, same mechanism as ema_cross/donchian
+    atr_mult: 2.0
 
 backtest:
   fee: 0.001          # Quidax order-book taker fee
