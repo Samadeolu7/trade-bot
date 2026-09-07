@@ -337,3 +337,13 @@ Next up per the user's shortlist (deferred until this infrastructure is
 confirmed working end-to-end on the VPS): a volatility-expansion breakout
 variant and a funding/positioning filter — explicitly on hold until the
 three services above are verified running independently.
+
+**Confirmed live (2026-09-07, ~07:23 UTC)**: user forwarded real Telegram
+output showing all three services posting distinct, correctly-labeled
+DAILY_SUMMARY and HEARTBEAT messages within the same minute —
+`donchian_adx_control`, `donchian_natr_regime`, and `multi_timeframe`, each
+`position=flat trades_all_time=0` (expected immediately post-deploy, no
+signal has fired yet on any of them). Concurrent, independently-labeled
+shadow runs are working end-to-end in production, not just in tests.
+Deleted the temporary `verify-concurrent-shadow.yml` workflow now that
+this is confirmed directly rather than via the SSH check.
