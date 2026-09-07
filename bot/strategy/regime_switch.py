@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import numpy as np
 import pandas as pd
 
@@ -32,6 +34,18 @@ class RegimeSwitchedStrategy(Strategy):
         signal = sub.generate_signal(df)
         if signal is not None:
             self._active = sub
+            # so it's discoverable later which regime/filter/sub-strategy
+            # combination actually produced this entry, not just that
+            # "regime_switched" (a moving config) did
+            signal = replace(
+                signal,
+                context={
+                    **signal.context,
+                    "regime": regime,
+                    "regime_filter": type(self.regime_filter).__name__,
+                    "sub_strategy": sub.name,
+                },
+            )
         return signal
 
     def trail_stop(self, df: pd.DataFrame, direction: Direction, current_stop: float) -> float:

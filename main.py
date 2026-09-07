@@ -20,6 +20,7 @@ from bot.strategy.donchian import DonchianBreakoutStrategy
 from bot.strategy.ema_cross import EmaCrossStrategy
 from bot.strategy.flat import FlatStrategy
 from bot.strategy.market_structure import MarketStructureBreakoutStrategy
+from bot.strategy.multi_timeframe import MultiTimeframeTrendPullbackStrategy
 from bot.strategy.regime import NatrRegimeFilter, RegimeFilter, Sma200RegimeFilter
 from bot.strategy.regime_switch import RegimeSwitchedStrategy
 from bot.strategy.rsi_bb import RsiBollingerStrategy
@@ -27,8 +28,10 @@ from bot.strategy.base import Strategy
 
 logger = logging.getLogger(__name__)
 
-STRATEGY_CHOICES = ["ema_cross", "rsi_bb", "donchian", "market_structure", "regime_switched"]
-TREND_STRATEGY_CHOICES = ["ema_cross", "donchian", "market_structure"]
+STRATEGY_CHOICES = [
+    "ema_cross", "rsi_bb", "donchian", "market_structure", "multi_timeframe", "regime_switched",
+]
+TREND_STRATEGY_CHOICES = ["ema_cross", "donchian", "market_structure", "multi_timeframe"]
 
 
 def _build_trend_strategy(name: str, strategy_config: dict) -> Strategy:
@@ -36,6 +39,8 @@ def _build_trend_strategy(name: str, strategy_config: dict) -> Strategy:
         return DonchianBreakoutStrategy(strategy_config.get("donchian", {}))
     if name == "market_structure":
         return MarketStructureBreakoutStrategy(strategy_config.get("market_structure", {}))
+    if name == "multi_timeframe":
+        return MultiTimeframeTrendPullbackStrategy(strategy_config.get("multi_timeframe", {}))
     return EmaCrossStrategy(strategy_config.get("ema_cross", {}))
 
 
@@ -161,6 +166,8 @@ def _build_strategy(name: str, strategy_config: dict) -> Strategy:
         return DonchianBreakoutStrategy(strategy_config.get("donchian", {}))
     if name == "market_structure":
         return MarketStructureBreakoutStrategy(strategy_config.get("market_structure", {}))
+    if name == "multi_timeframe":
+        return MultiTimeframeTrendPullbackStrategy(strategy_config.get("multi_timeframe", {}))
 
     # regime_switched: trend/ranging sub-strategies and regime-filter type are
     # config-driven (spec Section 1), not separate --strategy choices, so
@@ -317,12 +324,68 @@ def main() -> None:
 
     shadow_parser = subparsers.add_parser(
         "shadow",
-        help="Phase 4: run the finalized strategy live in paper/alert-only mode — "
-        "no orders placed, ever, at this stage",
+        help="Phase 4: run a strategy live in paper/alert-only mode — no orders placed, ever, "
+        "at this stage. Multiple concurrent shadow runs (distinct --strategy-label) can share "
+        "the same candle data and Telegram chat with fully independent paper positions.",
     )
     shadow_parser.add_argument("--symbol", default=None)
     shadow_parser.add_argument("--timeframe", default=None)
     shadow_parser.add_argument("--interval", type=int, default=None, help="seconds between checks")
+    shadow_parser.add_argument(
+        "--strategy",
+        choices=STRATEGY_CHOICES,
+        default="regime_switched",
+        help="defaults to regime_switched (the deployed control: donchian trend, flat ranging)",
+    )
+    shadow_parser.add_argument(
+        "--strategy-label",
+        default=None,
+        help="identifies this run's paper-trading state (DB rows, Telegram messages) so concurrent "
+        "shadow runs don't collide; defaults to --strategy's name",
+    )
+    shadow_parser.add_argument(
+        "--trend-strategy",
+        choices=TREND_STRATEGY_CHOICES,
+        default=None,
+        help="only for --strategy regime_switched: overrides strategy.regime_switched.trend_strategy",
+    )
+    shadow_parser.add_argument(
+        "--ranging-strategy",
+        choices=["flat", "rsi_bb"],
+        default=None,
+        help="only for --strategy regime_switched: overrides strategy.regime_switched.ranging_strategy",
+    )
+    shadow_parser.add_argument(
+        "--regime-type",
+        choices=["adx", "sma200", "natr"],
+        default=None,
+        help="only for --strategy regime_switched: overrides strategy.regime.type",
+    )
+    shadow_parser.add_argument(
+        "--exit-channel-period",
+        type=int,
+        default=None,
+        help="donchian (standalone or as regime_switched's trend strategy): "
+        "overrides strategy.donchian.exit_channel_period",
+    )
+    shadow_parser.add_argument(
+        "--exit-method",
+        choices=["channel", "atr"],
+        default=None,
+        help="donchian: overrides strategy.donchian.exit_method",
+    )
+    shadow_parser.add_argument(
+        "--donchian-atr-period",
+        type=int,
+        default=None,
+        help="donchian with --exit-method atr: overrides strategy.donchian.atr_period",
+    )
+    shadow_parser.add_argument(
+        "--donchian-atr-mult",
+        type=float,
+        default=None,
+        help="donchian with --exit-method atr: overrides strategy.donchian.atr_mult",
+    )
 
     args = parser.parse_args()
 
@@ -456,10 +519,27 @@ def main() -> None:
         strategy_config = config.get("strategy", {})
         backtest_config = config.get("backtest", {})
         alerting_config = config.get("alerting", {})
+        strategy_label = args.strategy_label or args.strategy
 
-        # Always the finalized strategy (spec Phase 4) — donchian trend,
-        # flat during ranging (Section 8 findings), not a --strategy choice.
-        strategy = _build_strategy("regime_switched", strategy_config)
+        strategy_config = _with_override(
+            strategy_config, "regime_switched", "trend_strategy", args.trend_strategy
+        )
+        strategy_config = _with_override(
+            strategy_config, "regime_switched", "ranging_strategy", args.ranging_strategy
+        )
+        strategy_config = _with_override(strategy_config, "regime", "type", args.regime_type)
+        strategy_config = _with_override(
+            strategy_config, "donchian", "exit_channel_period", args.exit_channel_period
+        )
+        strategy_config = _with_override(strategy_config, "donchian", "exit_method", args.exit_method)
+        strategy_config = _with_override(
+            strategy_config, "donchian", "atr_period", args.donchian_atr_period
+        )
+        strategy_config = _with_override(
+            strategy_config, "donchian", "atr_mult", args.donchian_atr_mult
+        )
+
+        strategy = _build_strategy(args.strategy, strategy_config)
 
         alerter = TelegramAlerter(
             os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
@@ -471,7 +551,7 @@ def main() -> None:
             )
 
         run_shadow_loop(
-            exchange, conn, alerter, exchange_id, symbol, timeframe, strategy,
+            exchange, conn, alerter, exchange_id, symbol, timeframe, strategy, strategy_label,
             fee=backtest_config.get("fee", 0.001),
             slippage=backtest_config.get("slippage", 0.0005),
             backfill_start_date=config["backfill"]["start_date"],

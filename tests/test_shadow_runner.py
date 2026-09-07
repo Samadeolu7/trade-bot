@@ -52,6 +52,9 @@ class ScriptedStrategy(Strategy):
         return self.signal_to_return
 
 
+STRATEGY_LABEL = "scripted"
+
+
 def day_ms(n_days_ago: int) -> int:
     ts = pd.Timestamp.now(tz="UTC").normalize() - pd.Timedelta(days=n_days_ago)
     return int(ts.value // 1_000_000)
@@ -77,11 +80,11 @@ def test_skips_when_not_enough_complete_history(tmp_path):
     strategy = ScriptedStrategy(signal_to_return=None, min_lookback=100)
 
     shadow_poll_once(
-        exchange, conn, alerter, "binance", "BTC/USDT", "1d", strategy,
+        exchange, conn, alerter, "binance", "BTC/USDT", "1d", strategy, STRATEGY_LABEL,
         fee=0.001, slippage=0.0005, backfill_start_date="2020-01-01T00:00:00Z",
     )
 
-    assert get_open_paper_position(conn, "binance", "BTC/USDT", "1d") is None
+    assert get_open_paper_position(conn, "binance", "BTC/USDT", "1d", STRATEGY_LABEL) is None
     alerter.send.assert_not_called()
 
 
@@ -97,11 +100,11 @@ def test_opens_paper_position_and_alerts_on_signal(tmp_path):
     strategy = ScriptedStrategy(signal_to_return=signal, min_lookback=1)
 
     shadow_poll_once(
-        exchange, conn, alerter, "binance", "BTC/USDT", "1d", strategy,
+        exchange, conn, alerter, "binance", "BTC/USDT", "1d", strategy, STRATEGY_LABEL,
         fee=0.0, slippage=0.0, backfill_start_date="2020-01-01T00:00:00Z",
     )
 
-    position = get_open_paper_position(conn, "binance", "BTC/USDT", "1d")
+    position = get_open_paper_position(conn, "binance", "BTC/USDT", "1d", STRATEGY_LABEL)
     assert position is not None
     assert position["direction"] == "long"
     assert position["entry_price"] == 100.0
@@ -109,8 +112,8 @@ def test_opens_paper_position_and_alerts_on_signal(tmp_path):
     alerter.send.assert_called_once()
     assert "SIGNAL_FIRED" in alerter.send.call_args[0][0]
 
-    row = conn.execute("SELECT direction, reason FROM signals").fetchone()
-    assert row == ("long", "test breakout")
+    row = conn.execute("SELECT direction, reason, strategy_label FROM signals").fetchone()
+    assert row == ("long", "test breakout", STRATEGY_LABEL)
 
 
 def test_does_not_reevaluate_entries_while_position_open(tmp_path):
@@ -125,7 +128,7 @@ def test_does_not_reevaluate_entries_while_position_open(tmp_path):
     strategy = ScriptedStrategy(signal_to_return=signal, min_lookback=1)
 
     shadow_poll_once(
-        exchange, conn, alerter, "binance", "BTC/USDT", "1d", strategy,
+        exchange, conn, alerter, "binance", "BTC/USDT", "1d", strategy, STRATEGY_LABEL,
         fee=0.0, slippage=0.0, backfill_start_date="2020-01-01T00:00:00Z",
     )
     assert alerter.send.call_count == 1
@@ -134,7 +137,7 @@ def test_does_not_reevaluate_entries_while_position_open(tmp_path):
     # NOT re-fire — a position is already open, so entry logic is skipped
     exchange.pages = [[]]
     shadow_poll_once(
-        exchange, conn, alerter, "binance", "BTC/USDT", "1d", strategy,
+        exchange, conn, alerter, "binance", "BTC/USDT", "1d", strategy, STRATEGY_LABEL,
         fee=0.0, slippage=0.0, backfill_start_date="2020-01-01T00:00:00Z",
     )
     assert alerter.send.call_count == 1
@@ -155,18 +158,18 @@ def test_closes_paper_position_on_stop_hit(tmp_path):
     position = engine_open_position(
         entry_signal, size=1.0, fee=0.0, slippage=0.0, owner=placeholder_strategy
     )
-    open_paper_position(conn, "binance", "BTC/USDT", "1d", position)
+    open_paper_position(conn, "binance", "BTC/USDT", "1d", STRATEGY_LABEL, position)
 
     # overwrite yesterday's (already-complete) candle so its low breaches the stop
     upsert_candles(conn, "binance", "BTC/USDT", "1d", [[day_ms(1), 100.0, 100.5, 90.0, 92.0, 1.0]])
 
     strategy = ScriptedStrategy(signal_to_return=None, min_lookback=1)
     shadow_poll_once(
-        exchange, conn, alerter, "binance", "BTC/USDT", "1d", strategy,
+        exchange, conn, alerter, "binance", "BTC/USDT", "1d", strategy, STRATEGY_LABEL,
         fee=0.0, slippage=0.0, backfill_start_date="2020-01-01T00:00:00Z",
     )
 
-    assert get_open_paper_position(conn, "binance", "BTC/USDT", "1d") is None
+    assert get_open_paper_position(conn, "binance", "BTC/USDT", "1d", STRATEGY_LABEL) is None
     trade_row = conn.execute(
         "SELECT direction, exit_price, exit_reason FROM paper_trades"
     ).fetchone()
@@ -201,11 +204,11 @@ def test_end_to_end_with_real_production_strategy(tmp_path):
     alerter = MagicMock()
 
     shadow_poll_once(
-        exchange, conn, alerter, "binance", "BTC/USDT", "1d", strategy,
+        exchange, conn, alerter, "binance", "BTC/USDT", "1d", strategy, "regime_switched",
         fee=0.001, slippage=0.0005, backfill_start_date="2020-01-01T00:00:00Z",
     )
 
-    position = get_open_paper_position(conn, "binance", "BTC/USDT", "1d")
+    position = get_open_paper_position(conn, "binance", "BTC/USDT", "1d", "regime_switched")
     assert position is not None
     assert position["direction"] == "long"
     alerter.send.assert_called_once()
@@ -217,20 +220,31 @@ def test_heartbeat_retries_every_call_until_delivery_succeeds(tmp_path):
     failing_alerter = MagicMock()
     failing_alerter.send.return_value = False
 
-    maybe_send_heartbeat(conn, failing_alerter, "BTC/USDT", "1d", interval_seconds=86400)
-    assert get_state(conn, "last_heartbeat_at") is None  # not marked sent — should retry
+    maybe_send_heartbeat(conn, failing_alerter, "BTC/USDT", "1d", STRATEGY_LABEL, interval_seconds=86400)
+    assert get_state(conn, f"{STRATEGY_LABEL}:last_heartbeat_at") is None  # not marked sent — should retry
 
-    maybe_send_heartbeat(conn, failing_alerter, "BTC/USDT", "1d", interval_seconds=86400)
+    maybe_send_heartbeat(conn, failing_alerter, "BTC/USDT", "1d", STRATEGY_LABEL, interval_seconds=86400)
     assert failing_alerter.send.call_count == 2  # retried immediately, not backed off 24h
 
     succeeding_alerter = MagicMock()
     succeeding_alerter.send.return_value = True
-    maybe_send_heartbeat(conn, succeeding_alerter, "BTC/USDT", "1d", interval_seconds=86400)
-    assert get_state(conn, "last_heartbeat_at") is not None  # now correctly marked sent
+    maybe_send_heartbeat(conn, succeeding_alerter, "BTC/USDT", "1d", STRATEGY_LABEL, interval_seconds=86400)
+    assert get_state(conn, f"{STRATEGY_LABEL}:last_heartbeat_at") is not None  # now correctly marked sent
 
     # a further call within the interval should not re-send
-    maybe_send_heartbeat(conn, succeeding_alerter, "BTC/USDT", "1d", interval_seconds=86400)
+    maybe_send_heartbeat(conn, succeeding_alerter, "BTC/USDT", "1d", STRATEGY_LABEL, interval_seconds=86400)
     assert succeeding_alerter.send.call_count == 1
+
+
+def test_heartbeat_scoped_by_strategy_label(tmp_path):
+    conn = make_conn(tmp_path)
+    alerter = MagicMock()
+    alerter.send.return_value = True
+
+    maybe_send_heartbeat(conn, alerter, "BTC/USDT", "1d", "donchian", interval_seconds=86400)
+    # a different strategy's heartbeat schedule is independent — not skipped
+    maybe_send_heartbeat(conn, alerter, "BTC/USDT", "1d", "multi_timeframe", interval_seconds=86400)
+    assert alerter.send.call_count == 2
 
 
 def test_daily_summary_retries_until_delivery_succeeds(tmp_path):
@@ -238,18 +252,18 @@ def test_daily_summary_retries_until_delivery_succeeds(tmp_path):
     failing_alerter = MagicMock()
     failing_alerter.send.return_value = False
 
-    maybe_send_daily_summary(conn, failing_alerter, "binance", "BTC/USDT", "1d")
-    assert get_state(conn, "last_summary_date") is None
+    maybe_send_daily_summary(conn, failing_alerter, "binance", "BTC/USDT", "1d", STRATEGY_LABEL)
+    assert get_state(conn, f"{STRATEGY_LABEL}:last_summary_date") is None
 
-    maybe_send_daily_summary(conn, failing_alerter, "binance", "BTC/USDT", "1d")
+    maybe_send_daily_summary(conn, failing_alerter, "binance", "BTC/USDT", "1d", STRATEGY_LABEL)
     assert failing_alerter.send.call_count == 2  # retried, not skipped for the rest of the day
 
     succeeding_alerter = MagicMock()
     succeeding_alerter.send.return_value = True
-    maybe_send_daily_summary(conn, succeeding_alerter, "binance", "BTC/USDT", "1d")
-    assert get_state(conn, "last_summary_date") is not None
+    maybe_send_daily_summary(conn, succeeding_alerter, "binance", "BTC/USDT", "1d", STRATEGY_LABEL)
+    assert get_state(conn, f"{STRATEGY_LABEL}:last_summary_date") is not None
 
-    maybe_send_daily_summary(conn, succeeding_alerter, "binance", "BTC/USDT", "1d")
+    maybe_send_daily_summary(conn, succeeding_alerter, "binance", "BTC/USDT", "1d", STRATEGY_LABEL)
     assert succeeding_alerter.send.call_count == 1
 
 

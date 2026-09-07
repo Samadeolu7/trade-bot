@@ -24,9 +24,10 @@ def make_signal(**overrides):
 
 
 def test_signal_message_is_structured_key_value():
-    msg = format_signal_message(make_signal(), "BTC/USDT", "1d")
+    msg = format_signal_message(make_signal(), "BTC/USDT", "1d", "donchian")
     lines = msg.splitlines()
     assert lines[0] == "SIGNAL_FIRED"
+    assert "strategy=donchian" in lines
     assert "symbol=BTC/USDT" in lines
     assert "timeframe=1d" in lines
     assert "direction=long" in lines
@@ -36,29 +37,31 @@ def test_signal_message_is_structured_key_value():
 
 
 def test_signal_message_blank_target_when_none():
-    msg = format_signal_message(make_signal(take_profit=None), "BTC/USDT", "1d")
+    msg = format_signal_message(make_signal(take_profit=None), "BTC/USDT", "1d", "donchian")
     assert "target=" in msg.splitlines()
 
 
 def test_signal_message_formats_target_when_present():
-    msg = format_signal_message(make_signal(take_profit=70000.0), "BTC/USDT", "1d")
+    msg = format_signal_message(make_signal(take_profit=70000.0), "BTC/USDT", "1d", "donchian")
     assert "target=70000.00" in msg.splitlines()
 
 
 def test_exit_message_structure():
     msg = format_exit_message(
-        "BTC/USDT", "1d", "long", 67234.5, 71890.0, 6.92, "stop", "2026-09-10T00:00:00Z"
+        "BTC/USDT", "1d", "donchian", "long", 67234.5, 71890.0, 6.92, "stop", "2026-09-10T00:00:00Z"
     )
     lines = msg.splitlines()
     assert lines[0] == "POSITION_CLOSED"
+    assert "strategy=donchian" in lines
     assert "pnl_pct=6.92" in lines
     assert "reason=stop" in lines
 
 
 def test_daily_summary_flat():
-    msg = format_daily_summary("BTC/USDT", "1d", None, 0, 5, 3.21)
+    msg = format_daily_summary("BTC/USDT", "1d", "donchian", None, 0, 5, 3.21)
     lines = msg.splitlines()
     assert lines[0] == "DAILY_SUMMARY"
+    assert "strategy=donchian" in lines
     assert "position=flat" in lines
     assert "trades_today=0" in lines
     assert "trades_all_time=5" in lines
@@ -72,7 +75,7 @@ def test_daily_summary_open_position():
         "entry_price": 65000.0,
         "stop": 60000.0,
     }
-    msg = format_daily_summary("BTC/USDT", "1d", open_position, 1, 6, 4.0)
+    msg = format_daily_summary("BTC/USDT", "1d", "donchian", open_position, 1, 6, 4.0)
     position_line = next(line for line in msg.splitlines() if line.startswith("position="))
     assert "long since 2026-09-01T00:00:00Z" in position_line
     assert "entry=65000.00" in position_line
@@ -80,12 +83,14 @@ def test_daily_summary_open_position():
 
 
 def test_heartbeat_structure():
-    msg = format_heartbeat("BTC/USDT", "1d")
+    msg = format_heartbeat("BTC/USDT", "1d", "donchian")
     assert msg.splitlines()[0] == "HEARTBEAT"
+    assert "strategy=donchian" in msg.splitlines()
     assert "status=alive" in msg.splitlines()
 
 
 def test_error_alert_structure():
-    msg = format_error_alert("BTC/USDT", "1d", "connection timed out")
+    msg = format_error_alert("BTC/USDT", "1d", "donchian", "connection timed out")
     assert msg.splitlines()[0] == "ERROR"
+    assert "strategy=donchian" in msg.splitlines()
     assert "detail=connection timed out" in msg.splitlines()

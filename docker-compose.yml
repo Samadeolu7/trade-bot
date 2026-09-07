@@ -1,6 +1,9 @@
 name: btc_trade_bot
 
 services:
+  # Control — untouched. Donchian trend / flat ranging / ADX regime filter,
+  # the strategy that's been shadow-running since Phase 4. Do not change
+  # this service when adding new concurrent candidates below.
   trade-bot:
     image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
     container_name: btc_trade_bot
@@ -10,7 +13,35 @@ services:
     volumes:
       - trade_bot_data:/app/data
       - trade_bot_logs:/app/logs
-    command: ["python", "main.py", "shadow"]
+    command: ["python", "main.py", "shadow", "--strategy", "regime_switched", "--strategy-label", "donchian_adx_control"]
+
+  # Concurrent candidate #2 (roadmap Tier 1): multi-timeframe trend +
+  # pullback. Shares the candle data in trade_bot_data (same exchange/
+  # symbol/timeframe) but keeps fully independent paper-trading state via
+  # its own --strategy-label — no shared capital with the control.
+  trade-bot-multi-timeframe:
+    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
+    container_name: btc_trade_bot_multi_timeframe
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - trade_bot_data:/app/data
+      - trade_bot_logs:/app/logs
+    command: ["python", "main.py", "shadow", "--strategy", "multi_timeframe", "--strategy-label", "multi_timeframe"]
+
+  # Concurrent candidate #3: donchian trend gated by the NATR
+  # volatility-expansion regime filter instead of ADX.
+  trade-bot-natr-regime:
+    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
+    container_name: btc_trade_bot_natr_regime
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - trade_bot_data:/app/data
+      - trade_bot_logs:/app/logs
+    command: ["python", "main.py", "shadow", "--strategy", "regime_switched", "--strategy-label", "donchian_natr_regime", "--regime-type", "natr"]
 
 volumes:
   trade_bot_data:

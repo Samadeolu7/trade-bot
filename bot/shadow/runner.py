@@ -58,6 +58,7 @@ def shadow_poll_once(
     symbol: str,
     timeframe: str,
     strategy: Strategy,
+    strategy_label: str,
     fee: float,
     slippage: float,
     backfill_start_date: str,
@@ -66,10 +67,16 @@ def shadow_poll_once(
     """One shadow-run iteration. Reuses engine.open_position/check_exit/
     close_position directly (not a reimplementation) so live behavior can't
     silently diverge from what the backtest models — the entire point of a
-    shadow run is comparing the two (spec Phase 4)."""
+    shadow run is comparing the two (spec Phase 4).
+
+    strategy_label keys every DB row and alert so multiple strategies can
+    shadow-run the same symbol/timeframe concurrently with fully independent
+    paper positions and trade history — no shared capital between them."""
     # resume=True: fetches from wherever local data left off, so this both
     # keeps up with routine new candles and catches up after any downtime
     # (VPS restart, network blip) without a gap, in the same code path.
+    # Candle data itself is shared across strategies (same exchange/symbol/
+    # timeframe) — only the paper-trading state below is per-strategy.
     backfill_candles(exchange, conn, exchange_id, symbol, timeframe, backfill_start_date, resume=True)
 
     df = query_candles_df(conn, exchange_id, symbol, timeframe).tail(
@@ -79,18 +86,18 @@ def shadow_poll_once(
 
     if len(df) < strategy.min_lookback:
         logger.info(
-            "not enough complete history yet (%d/%d bars) — skipping this iteration",
-            len(df), strategy.min_lookback,
+            "[%s] not enough complete history yet (%d/%d bars) — skipping this iteration",
+            strategy_label, len(df), strategy.min_lookback,
         )
         return
 
     bar = df.iloc[-1]
-    position = get_open_paper_position(conn, exchange_id, symbol, timeframe)
+    position = get_open_paper_position(conn, exchange_id, symbol, timeframe, strategy_label)
 
     if position is not None:
         new_stop = strategy.trail_stop(df, position["direction"], position["stop"])
         if new_stop != position["stop"]:
-            update_paper_position_stop(conn, exchange_id, symbol, timeframe, new_stop)
+            update_paper_position_stop(conn, exchange_id, symbol, timeframe, strategy_label, new_stop)
             position["stop"] = new_stop
 
         exit_price, exit_reason = check_exit(position, bar)
@@ -98,18 +105,19 @@ def shadow_poll_once(
             pnl, effective_exit = close_position(position, exit_price, fee, slippage)
             pnl_pct = (pnl / (position["entry_price"] * position["size"])) * 100
             record_paper_trade(
-                conn, exchange_id, symbol, timeframe, position["direction"],
+                conn, exchange_id, symbol, timeframe, strategy_label, position["direction"],
                 position["entry_time"], position["entry_price"],
                 bar.name, effective_exit, pnl, pnl_pct, exit_reason, bar.name,
+                context=position.get("context"),
             )
-            close_paper_position(conn, exchange_id, symbol, timeframe)
+            close_paper_position(conn, exchange_id, symbol, timeframe, strategy_label)
             logger.info(
-                "paper position closed: %s pnl_pct=%.2f reason=%s",
-                position["direction"], pnl_pct, exit_reason,
+                "[%s] paper position closed: %s pnl_pct=%.2f reason=%s",
+                strategy_label, position["direction"], pnl_pct, exit_reason,
             )
             alerter.send(
                 format_exit_message(
-                    symbol, timeframe, position["direction"], position["entry_price"],
+                    symbol, timeframe, strategy_label, position["direction"], position["entry_price"],
                     effective_exit, pnl_pct, exit_reason, bar.name,
                 )
             )
@@ -118,22 +126,23 @@ def shadow_poll_once(
     if position is None:
         signal = strategy.generate_signal(df)
         if signal is not None and signal.direction != "flat":
-            record_signal(conn, exchange_id, symbol, timeframe, signal)
+            record_signal(conn, exchange_id, symbol, timeframe, strategy_label, signal)
             new_position = open_position(signal, size=1.0, fee=fee, slippage=slippage, owner=strategy)
-            open_paper_position(conn, exchange_id, symbol, timeframe, new_position)
+            open_paper_position(conn, exchange_id, symbol, timeframe, strategy_label, new_position)
             logger.info(
-                "signal fired: %s entry=%.2f stop=%.2f reason=%s",
-                signal.direction, signal.entry_price, signal.stop_loss, signal.reason,
+                "[%s] signal fired: %s entry=%.2f stop=%.2f reason=%s",
+                strategy_label, signal.direction, signal.entry_price, signal.stop_loss, signal.reason,
             )
-            alerter.send(format_signal_message(signal, symbol, timeframe))
+            alerter.send(format_signal_message(signal, symbol, timeframe, strategy_label))
 
 
 def maybe_send_heartbeat(
     conn: sqlite3.Connection, alerter: TelegramAlerter, symbol: str, timeframe: str,
-    interval_seconds: int,
+    strategy_label: str, interval_seconds: int,
 ) -> None:
     now_ms = int(time.time() * 1000)
-    last = get_state(conn, "last_heartbeat_at")
+    state_key = f"{strategy_label}:last_heartbeat_at"
+    last = get_state(conn, state_key)
     if last is not None and now_ms - int(last) < interval_seconds * 1000:
         return
     # Only mark it "sent" if it actually was — if Telegram is unconfigured or
@@ -141,26 +150,30 @@ def maybe_send_heartbeat(
     # it gets through, not to silently go quiet for a full interval because
     # the first attempt failed (that's exactly the failure a heartbeat is
     # supposed to catch).
-    if alerter.send(format_heartbeat(symbol, timeframe)):
-        set_state(conn, "last_heartbeat_at", str(now_ms))
+    if alerter.send(format_heartbeat(symbol, timeframe, strategy_label)):
+        set_state(conn, state_key, str(now_ms))
 
 
 def maybe_send_daily_summary(
-    conn: sqlite3.Connection, alerter: TelegramAlerter, exchange_id: str, symbol: str, timeframe: str
+    conn: sqlite3.Connection, alerter: TelegramAlerter, exchange_id: str, symbol: str, timeframe: str,
+    strategy_label: str,
 ) -> None:
     today = pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d")
-    if get_state(conn, "last_summary_date") == today:
+    state_key = f"{strategy_label}:last_summary_date"
+    if get_state(conn, state_key) == today:
         return
     since_ms = int(pd.Timestamp.now(tz="UTC").normalize().value // 1_000_000)
-    open_position = get_open_paper_position(conn, exchange_id, symbol, timeframe)
-    trades_today = count_paper_trades_since(conn, exchange_id, symbol, timeframe, since_ms)
-    trades_all_time = count_paper_trades_all_time(conn, exchange_id, symbol, timeframe)
-    total_pnl_pct = sum_paper_trade_pnl_pct(conn, exchange_id, symbol, timeframe)
+    open_position = get_open_paper_position(conn, exchange_id, symbol, timeframe, strategy_label)
+    trades_today = count_paper_trades_since(conn, exchange_id, symbol, timeframe, strategy_label, since_ms)
+    trades_all_time = count_paper_trades_all_time(conn, exchange_id, symbol, timeframe, strategy_label)
+    total_pnl_pct = sum_paper_trade_pnl_pct(conn, exchange_id, symbol, timeframe, strategy_label)
     sent = alerter.send(
-        format_daily_summary(symbol, timeframe, open_position, trades_today, trades_all_time, total_pnl_pct)
+        format_daily_summary(
+            symbol, timeframe, strategy_label, open_position, trades_today, trades_all_time, total_pnl_pct
+        )
     )
     if sent:
-        set_state(conn, "last_summary_date", today)
+        set_state(conn, state_key, today)
 
 
 def run_shadow_loop(
@@ -171,6 +184,7 @@ def run_shadow_loop(
     symbol: str,
     timeframe: str,
     strategy: Strategy,
+    strategy_label: str,
     fee: float,
     slippage: float,
     backfill_start_date: str,
@@ -178,18 +192,18 @@ def run_shadow_loop(
     heartbeat_interval_seconds: int = 86400,
 ) -> None:
     logger.info(
-        "starting shadow run for %s %s every %ds (paper trading only — no orders placed)",
-        symbol, timeframe, interval_seconds,
+        "starting shadow run '%s' for %s %s every %ds (paper trading only — no orders placed)",
+        strategy_label, symbol, timeframe, interval_seconds,
     )
     while True:
         try:
             shadow_poll_once(
-                exchange, conn, alerter, exchange_id, symbol, timeframe, strategy,
+                exchange, conn, alerter, exchange_id, symbol, timeframe, strategy, strategy_label,
                 fee, slippage, backfill_start_date,
             )
-            maybe_send_daily_summary(conn, alerter, exchange_id, symbol, timeframe)
-            maybe_send_heartbeat(conn, alerter, symbol, timeframe, heartbeat_interval_seconds)
+            maybe_send_daily_summary(conn, alerter, exchange_id, symbol, timeframe, strategy_label)
+            maybe_send_heartbeat(conn, alerter, symbol, timeframe, strategy_label, heartbeat_interval_seconds)
         except Exception as exc:
             logger.exception("shadow run iteration failed")
-            alerter.send(format_error_alert(symbol, timeframe, str(exc)))
+            alerter.send(format_error_alert(symbol, timeframe, strategy_label, str(exc)))
         time.sleep(interval_seconds)

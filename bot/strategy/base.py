@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 import pandas as pd
@@ -17,6 +17,12 @@ class Signal:
     take_profit: float | None
     reason: str
     timestamp: pd.Timestamp
+    # Diagnostic fields beyond the human-readable `reason` — regime state,
+    # indicator values at signal time, etc. Optional and strategy-specific;
+    # persisted alongside the signal/trade so patterns like "only profitable
+    # when volatility is expanding" are discoverable later without having
+    # rerun anything. Keep values JSON-serializable (str/int/float/bool).
+    context: dict = field(default_factory=dict)
 
 
 class Strategy(ABC):

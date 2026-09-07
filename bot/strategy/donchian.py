@@ -84,6 +84,16 @@ class DonchianBreakoutStrategy(Strategy):
         entry = df["close"].iloc[-1]
         timestamp = df.index[-1]
 
+        atr_val = atr(df["high"], df["low"], df["close"], self.atr_period).iloc[-1]
+        channel_width = last_entry_upper - last_entry_lower
+        context = {
+            "channel_period": self.channel_period,
+            "exit_method": self.exit_method,
+            "channel_width": round(float(channel_width), 2) if pd.notna(channel_width) else None,
+            "atr": round(float(atr_val), 2) if pd.notna(atr_val) else None,
+            "atr_pct": round(float(atr_val / entry * 100), 3) if pd.notna(atr_val) else None,
+        }
+
         if entry > last_entry_upper:
             return Signal(
                 symbol="",
@@ -94,6 +104,7 @@ class DonchianBreakoutStrategy(Strategy):
                 take_profit=None,
                 reason=f"close broke above {self.channel_period}-bar high channel",
                 timestamp=timestamp,
+                context=context,
             )
         if entry < last_entry_lower:
             return Signal(
@@ -105,6 +116,7 @@ class DonchianBreakoutStrategy(Strategy):
                 take_profit=None,
                 reason=f"close broke below {self.channel_period}-bar low channel",
                 timestamp=timestamp,
+                context=context,
             )
         return None
 

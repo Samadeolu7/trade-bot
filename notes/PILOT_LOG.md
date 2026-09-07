@@ -269,3 +269,71 @@ ADX filter) is untouched by any of this.
   call together rather than guessing solo, and the two new candidates above
   need real backtest results before it's clear whether stacking more
   untested strategies on top is the right next move at all.
+
+## Multi-timeframe trend+pullback built and evaluated (2026-09-07)
+
+User picked Tier 1 #2 (multi-timeframe trend+pullback) after reviewing
+candidate backtest results. Implemented `MultiTimeframeTrendPullbackStrategy`
+(`bot/strategy/multi_timeframe.py`): resamples the same daily data internally
+to a higher timeframe (`htf_rule`, default weekly) as a trend-permission
+gate, enters on the daily chart only on a pullback-then-reclaim of a short
+EMA in the permitted direction, ATR trailing stop. Also added a `context`
+dict to `Signal` (and populated it in donchian, multi_timeframe, and
+regime_switched) so diagnostic fields at signal time (regime, ATR%, channel
+width, etc.) are captured for later pattern analysis, not just the
+human-readable `reason` string.
+
+**Verdict: neither new candidate (multi_timeframe, market_structure) beat
+the deployed donchian+ADX control on real data.** Put back to the user
+rather than guessed past — their call was to prioritize concurrent
+shadow-run infrastructure over building more candidates, on the reasoning
+that once that infrastructure works, testing new hypotheses becomes cheap.
+
+## Concurrent shadow-run infrastructure (2026-09-07)
+
+Previously the DB schema and `shadow` CLI command assumed exactly one live
+strategy at a time — `paper_position` was keyed only by
+(exchange, symbol, timeframe), so two strategies shadow-running the same
+symbol would silently share (and corrupt) each other's paper position. Per
+the user's explicit mandate, rebuilt this so multiple strategies can
+shadow-run concurrently against the same candle data with fully independent
+paper-trading state and no shared capital:
+
+- **`bot/storage/db.py`**: added `strategy_label` to `signals`,
+  `paper_position` (now part of its primary key), and `paper_trades`; added
+  a JSON `context` column to `signals` and `paper_position` so the richer
+  `Signal.context` diagnostic data is actually persisted, not just logged.
+  Every affected function now takes `strategy_label`. Added a one-time
+  migration (`_migrate_shadow_tables`): these three tables are dropped and
+  recreated if they predate `strategy_label` — safe because every existing
+  deployment's tables were still empty (no signal had fired yet on the live
+  shadow run at the time of this change). Also switched to WAL journal mode
+  + a 30s busy timeout, since multiple containers now share one SQLite file.
+- **`bot/shadow/runner.py`**: threads `strategy_label` through every DB call
+  and Telegram message; heartbeat/daily-summary schedule state is now keyed
+  as `f"{strategy_label}:last_heartbeat_at"` etc. so concurrent runs don't
+  clobber each other's send schedule.
+- **`bot/alerting/messages.py`**: every formatted message now carries
+  `strategy=<label>` as its first field, so concurrent runs posting to the
+  same Telegram chat are distinguishable.
+- **`main.py`**: `shadow` subcommand generalized — accepts `--strategy`
+  (any of `STRATEGY_CHOICES`, default `regime_switched` to match the
+  existing control) and `--strategy-label` (defaults to `--strategy`'s
+  name), plus the same override flags (`--trend-strategy`,
+  `--ranging-strategy`, `--regime-type`, donchian exit params) `backtest`
+  already had, so a shadow run's exact configuration doesn't require a
+  code change.
+- **`docker-compose.yml`**: added two new services alongside the untouched
+  `trade-bot` control — `trade-bot-multi-timeframe`
+  (`--strategy multi_timeframe`) and `trade-bot-natr-regime`
+  (`--strategy regime_switched --regime-type natr`) — sharing the same
+  `trade_bot_data` volume (same candle store) but each with its own
+  `--strategy-label` so their paper positions/trades never collide.
+- All existing tests updated for the new signatures (149 passing); added
+  coverage for strategy-label-scoped isolation in both the DB layer and the
+  heartbeat/summary schedule.
+
+Next up per the user's shortlist (deferred until this infrastructure is
+confirmed working end-to-end on the VPS): a volatility-expansion breakout
+variant and a funding/positioning filter — explicitly on hold until the
+three services above are verified running independently.

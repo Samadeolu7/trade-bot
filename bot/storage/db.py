@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from pathlib import Path
 
@@ -19,20 +20,25 @@ CREATE TABLE IF NOT EXISTS candles (
 """
 
 # Phase 4 (shadow run) — no real capital, so trades are tracked as a single
-# open "paper" position per (exchange, symbol, timeframe) plus a log of
-# completed round-trips and every signal fired, per spec Section 11
-# (`signals`, `trades` tables).
+# open "paper" position per (exchange, symbol, timeframe, strategy_label)
+# plus a log of completed round-trips and every signal fired, per spec
+# Section 11 (`signals`, `trades` tables). strategy_label is part of the
+# identity (not just symbol/timeframe) so multiple strategies can shadow-run
+# the same symbol concurrently, each with independent state — see spec
+# Section 13/PILOT_LOG: no shared capital between concurrent shadow runs.
 CREATE_SIGNALS_TABLE = """
 CREATE TABLE IF NOT EXISTS signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     exchange TEXT NOT NULL,
     symbol TEXT NOT NULL,
     timeframe TEXT NOT NULL,
+    strategy_label TEXT NOT NULL,
     direction TEXT NOT NULL,
     entry_price REAL NOT NULL,
     stop_loss REAL NOT NULL,
     take_profit REAL,
     reason TEXT,
+    context TEXT,
     fired_at INTEGER NOT NULL
 )
 """
@@ -42,6 +48,7 @@ CREATE TABLE IF NOT EXISTS paper_position (
     exchange TEXT NOT NULL,
     symbol TEXT NOT NULL,
     timeframe TEXT NOT NULL,
+    strategy_label TEXT NOT NULL,
     direction TEXT NOT NULL,
     entry_price REAL NOT NULL,
     stop_loss REAL NOT NULL,
@@ -49,7 +56,8 @@ CREATE TABLE IF NOT EXISTS paper_position (
     entry_time INTEGER NOT NULL,
     entry_fee REAL NOT NULL,
     size REAL NOT NULL,
-    PRIMARY KEY (exchange, symbol, timeframe)
+    context TEXT,
+    PRIMARY KEY (exchange, symbol, timeframe, strategy_label)
 )
 """
 
@@ -59,6 +67,7 @@ CREATE TABLE IF NOT EXISTS paper_trades (
     exchange TEXT NOT NULL,
     symbol TEXT NOT NULL,
     timeframe TEXT NOT NULL,
+    strategy_label TEXT NOT NULL,
     direction TEXT NOT NULL,
     entry_time INTEGER NOT NULL,
     entry_price REAL NOT NULL,
@@ -67,12 +76,15 @@ CREATE TABLE IF NOT EXISTS paper_trades (
     pnl REAL NOT NULL,
     pnl_pct REAL NOT NULL,
     exit_reason TEXT NOT NULL,
+    context TEXT,
     closed_at INTEGER NOT NULL
 )
 """
 
 # Tiny key-value store for scheduling bookkeeping (e.g. "last heartbeat sent
-# at") that needs to survive process restarts.
+# at") that needs to survive process restarts. Keyed by the caller (e.g.
+# f"{strategy_label}:last_heartbeat_at") so concurrent shadow runs don't
+# clobber each other's schedule.
 CREATE_BOT_STATE_TABLE = """
 CREATE TABLE IF NOT EXISTS bot_state (
     key TEXT PRIMARY KEY,
@@ -81,10 +93,34 @@ CREATE TABLE IF NOT EXISTS bot_state (
 """
 
 
+def _migrate_shadow_tables(conn: sqlite3.Connection) -> None:
+    """One-time migration: signals/paper_position/paper_trades originally
+    had no strategy_label column, so a symbol/timeframe could only track one
+    strategy's paper state at a time. Concurrent shadow runs need it as part
+    of the identity. Dropped and recreated rather than ALTER TABLE (which
+    can't change a PRIMARY KEY in SQLite anyway) — every deployment that
+    predates this change had these tables empty (no signal had fired yet)."""
+    for table in ("signals", "paper_position", "paper_trades"):
+        cur = conn.execute(f"PRAGMA table_info({table})")
+        columns = [row[1] for row in cur.fetchall()]
+        if columns and "strategy_label" not in columns:
+            conn.execute(f"DROP TABLE {table}")
+    conn.commit()
+
+
 def connect(db_path: str = "data/trades.db") -> sqlite3.Connection:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=30)
+    if db_path != ":memory:":
+        # Concurrent shadow-run containers share one SQLite file (same
+        # candle data, independent strategy_label-scoped state) — WAL lets
+        # readers/writers overlap instead of blocking on the default
+        # rollback journal, and busy_timeout retries a write that still
+        # collides instead of raising "database is locked" immediately.
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=30000")
     conn.execute(CREATE_CANDLES_TABLE)
+    _migrate_shadow_tables(conn)
     conn.execute(CREATE_SIGNALS_TABLE)
     conn.execute(CREATE_PAPER_POSITION_TABLE)
     conn.execute(CREATE_PAPER_TRADES_TABLE)
@@ -154,35 +190,48 @@ def _to_epoch_ms(timestamp) -> int:
     return int(timestamp)
 
 
-def record_signal(conn: sqlite3.Connection, exchange: str, symbol: str, timeframe: str, signal) -> None:
+def _dump_context(context: dict | None) -> str | None:
+    return json.dumps(context) if context else None
+
+
+def _load_context(raw: str | None) -> dict:
+    return json.loads(raw) if raw else {}
+
+
+def record_signal(
+    conn: sqlite3.Connection, exchange: str, symbol: str, timeframe: str, strategy_label: str, signal
+) -> None:
     conn.execute(
         """
         INSERT INTO signals
-            (exchange, symbol, timeframe, direction, entry_price, stop_loss, take_profit, reason, fired_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (exchange, symbol, timeframe, strategy_label, direction, entry_price, stop_loss,
+             take_profit, reason, context, fired_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            exchange, symbol, timeframe, signal.direction, signal.entry_price,
-            signal.stop_loss, signal.take_profit, signal.reason, _to_epoch_ms(signal.timestamp),
+            exchange, symbol, timeframe, strategy_label, signal.direction, signal.entry_price,
+            signal.stop_loss, signal.take_profit, signal.reason, _dump_context(signal.context),
+            _to_epoch_ms(signal.timestamp),
         ),
     )
     conn.commit()
 
 
 def get_open_paper_position(
-    conn: sqlite3.Connection, exchange: str, symbol: str, timeframe: str
+    conn: sqlite3.Connection, exchange: str, symbol: str, timeframe: str, strategy_label: str
 ) -> dict | None:
     cur = conn.execute(
         """
-        SELECT direction, entry_price, stop_loss, take_profit, entry_time, entry_fee, size
-        FROM paper_position WHERE exchange = ? AND symbol = ? AND timeframe = ?
+        SELECT direction, entry_price, stop_loss, take_profit, entry_time, entry_fee, size, context
+        FROM paper_position
+        WHERE exchange = ? AND symbol = ? AND timeframe = ? AND strategy_label = ?
         """,
-        (exchange, symbol, timeframe),
+        (exchange, symbol, timeframe, strategy_label),
     )
     row = cur.fetchone()
     if row is None:
         return None
-    direction, entry_price, stop_loss, take_profit, entry_time, entry_fee, size = row
+    direction, entry_price, stop_loss, take_profit, entry_time, entry_fee, size, context = row
     return {
         "direction": direction,
         "entry_price": entry_price,
@@ -191,42 +240,57 @@ def get_open_paper_position(
         "entry_time": entry_time,
         "entry_fee": entry_fee,
         "size": size,
+        "context": _load_context(context),
     }
 
 
 def open_paper_position(
-    conn: sqlite3.Connection, exchange: str, symbol: str, timeframe: str, position: dict
+    conn: sqlite3.Connection,
+    exchange: str,
+    symbol: str,
+    timeframe: str,
+    strategy_label: str,
+    position: dict,
 ) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO paper_position
-            (exchange, symbol, timeframe, direction, entry_price, stop_loss, take_profit,
-             entry_time, entry_fee, size)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (exchange, symbol, timeframe, strategy_label, direction, entry_price, stop_loss,
+             take_profit, entry_time, entry_fee, size, context)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            exchange, symbol, timeframe, position["direction"], position["entry_price"],
-            position["stop"], position["take_profit"], _to_epoch_ms(position["entry_time"]),
-            position["entry_fee"], position["size"],
+            exchange, symbol, timeframe, strategy_label, position["direction"],
+            position["entry_price"], position["stop"], position["take_profit"],
+            _to_epoch_ms(position["entry_time"]), position["entry_fee"], position["size"],
+            _dump_context(position.get("context")),
         ),
     )
     conn.commit()
 
 
 def update_paper_position_stop(
-    conn: sqlite3.Connection, exchange: str, symbol: str, timeframe: str, new_stop: float
+    conn: sqlite3.Connection, exchange: str, symbol: str, timeframe: str, strategy_label: str, new_stop: float
 ) -> None:
     conn.execute(
-        "UPDATE paper_position SET stop_loss = ? WHERE exchange = ? AND symbol = ? AND timeframe = ?",
-        (new_stop, exchange, symbol, timeframe),
+        """
+        UPDATE paper_position SET stop_loss = ?
+        WHERE exchange = ? AND symbol = ? AND timeframe = ? AND strategy_label = ?
+        """,
+        (new_stop, exchange, symbol, timeframe, strategy_label),
     )
     conn.commit()
 
 
-def close_paper_position(conn: sqlite3.Connection, exchange: str, symbol: str, timeframe: str) -> None:
+def close_paper_position(
+    conn: sqlite3.Connection, exchange: str, symbol: str, timeframe: str, strategy_label: str
+) -> None:
     conn.execute(
-        "DELETE FROM paper_position WHERE exchange = ? AND symbol = ? AND timeframe = ?",
-        (exchange, symbol, timeframe),
+        """
+        DELETE FROM paper_position
+        WHERE exchange = ? AND symbol = ? AND timeframe = ? AND strategy_label = ?
+        """,
+        (exchange, symbol, timeframe, strategy_label),
     )
     conn.commit()
 
@@ -236,6 +300,7 @@ def record_paper_trade(
     exchange: str,
     symbol: str,
     timeframe: str,
+    strategy_label: str,
     direction: str,
     entry_time,
     entry_price: float,
@@ -245,54 +310,59 @@ def record_paper_trade(
     pnl_pct: float,
     exit_reason: str,
     closed_at,
+    context: dict | None = None,
 ) -> None:
     conn.execute(
         """
         INSERT INTO paper_trades
-            (exchange, symbol, timeframe, direction, entry_time, entry_price,
-             exit_time, exit_price, pnl, pnl_pct, exit_reason, closed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (exchange, symbol, timeframe, strategy_label, direction, entry_time, entry_price,
+             exit_time, exit_price, pnl, pnl_pct, exit_reason, context, closed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            exchange, symbol, timeframe, direction, _to_epoch_ms(entry_time), entry_price,
-            _to_epoch_ms(exit_time), exit_price, pnl, pnl_pct, exit_reason, _to_epoch_ms(closed_at),
+            exchange, symbol, timeframe, strategy_label, direction, _to_epoch_ms(entry_time),
+            entry_price, _to_epoch_ms(exit_time), exit_price, pnl, pnl_pct, exit_reason,
+            _dump_context(context), _to_epoch_ms(closed_at),
         ),
     )
     conn.commit()
 
 
 def count_paper_trades_since(
-    conn: sqlite3.Connection, exchange: str, symbol: str, timeframe: str, since_ms: int
+    conn: sqlite3.Connection, exchange: str, symbol: str, timeframe: str, strategy_label: str, since_ms: int
 ) -> int:
     cur = conn.execute(
         """
         SELECT COUNT(*) FROM paper_trades
-        WHERE exchange = ? AND symbol = ? AND timeframe = ? AND closed_at >= ?
+        WHERE exchange = ? AND symbol = ? AND timeframe = ? AND strategy_label = ? AND closed_at >= ?
         """,
-        (exchange, symbol, timeframe, since_ms),
+        (exchange, symbol, timeframe, strategy_label, since_ms),
     )
     return cur.fetchone()[0]
 
 
 def count_paper_trades_all_time(
-    conn: sqlite3.Connection, exchange: str, symbol: str, timeframe: str
+    conn: sqlite3.Connection, exchange: str, symbol: str, timeframe: str, strategy_label: str
 ) -> int:
     cur = conn.execute(
-        "SELECT COUNT(*) FROM paper_trades WHERE exchange = ? AND symbol = ? AND timeframe = ?",
-        (exchange, symbol, timeframe),
+        """
+        SELECT COUNT(*) FROM paper_trades
+        WHERE exchange = ? AND symbol = ? AND timeframe = ? AND strategy_label = ?
+        """,
+        (exchange, symbol, timeframe, strategy_label),
     )
     return cur.fetchone()[0]
 
 
 def sum_paper_trade_pnl_pct(
-    conn: sqlite3.Connection, exchange: str, symbol: str, timeframe: str
+    conn: sqlite3.Connection, exchange: str, symbol: str, timeframe: str, strategy_label: str
 ) -> float:
     cur = conn.execute(
         """
         SELECT COALESCE(SUM(pnl_pct), 0) FROM paper_trades
-        WHERE exchange = ? AND symbol = ? AND timeframe = ?
+        WHERE exchange = ? AND symbol = ? AND timeframe = ? AND strategy_label = ?
         """,
-        (exchange, symbol, timeframe),
+        (exchange, symbol, timeframe, strategy_label),
     )
     return cur.fetchone()[0]
 

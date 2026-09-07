@@ -62,6 +62,7 @@ def open_position(signal: Signal, size: float, fee: float, slippage: float, owne
         "take_profit": signal.take_profit,
         "entry_fee": entry_fee,
         "strategy": owner,
+        "context": signal.context,
     }
 
 

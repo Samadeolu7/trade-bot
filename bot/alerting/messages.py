@@ -2,7 +2,11 @@
 "keep the message format consistent and parseable... in case it's parsed
 programmatically later"). Every message is a header line naming the event
 type, followed by simple `key=value` lines — easy to read in Telegram and
-trivial to parse back out if needed."""
+trivial to parse back out if needed.
+
+Every message carries `strategy` — with multiple shadow runs posting to the
+same chat concurrently, the header line alone doesn't say which strategy an
+alert belongs to."""
 
 from bot.strategy.base import Signal
 
@@ -14,10 +18,11 @@ def _kv_lines(header: str, fields: dict) -> str:
     return "\n".join(lines)
 
 
-def format_signal_message(signal: Signal, symbol: str, timeframe: str) -> str:
+def format_signal_message(signal: Signal, symbol: str, timeframe: str, strategy_label: str) -> str:
     return _kv_lines(
         "SIGNAL_FIRED",
         {
+            "strategy": strategy_label,
             "symbol": symbol,
             "timeframe": timeframe,
             "direction": signal.direction,
@@ -33,6 +38,7 @@ def format_signal_message(signal: Signal, symbol: str, timeframe: str) -> str:
 def format_exit_message(
     symbol: str,
     timeframe: str,
+    strategy_label: str,
     direction: str,
     entry_price: float,
     exit_price: float,
@@ -43,6 +49,7 @@ def format_exit_message(
     return _kv_lines(
         "POSITION_CLOSED",
         {
+            "strategy": strategy_label,
             "symbol": symbol,
             "timeframe": timeframe,
             "direction": direction,
@@ -58,6 +65,7 @@ def format_exit_message(
 def format_daily_summary(
     symbol: str,
     timeframe: str,
+    strategy_label: str,
     open_position: dict | None,
     trades_today: int,
     trades_all_time: int,
@@ -73,6 +81,7 @@ def format_daily_summary(
     return _kv_lines(
         "DAILY_SUMMARY",
         {
+            "strategy": strategy_label,
             "symbol": symbol,
             "timeframe": timeframe,
             "position": position_line,
@@ -83,9 +92,13 @@ def format_daily_summary(
     )
 
 
-def format_heartbeat(symbol: str, timeframe: str) -> str:
-    return _kv_lines("HEARTBEAT", {"symbol": symbol, "timeframe": timeframe, "status": "alive"})
+def format_heartbeat(symbol: str, timeframe: str, strategy_label: str) -> str:
+    return _kv_lines(
+        "HEARTBEAT", {"strategy": strategy_label, "symbol": symbol, "timeframe": timeframe, "status": "alive"}
+    )
 
 
-def format_error_alert(symbol: str, timeframe: str, error: str) -> str:
-    return _kv_lines("ERROR", {"symbol": symbol, "timeframe": timeframe, "detail": error})
+def format_error_alert(symbol: str, timeframe: str, strategy_label: str, error: str) -> str:
+    return _kv_lines(
+        "ERROR", {"strategy": strategy_label, "symbol": symbol, "timeframe": timeframe, "detail": error}
+    )
