@@ -113,6 +113,21 @@ Per spec Section 8, don't judge a strategy from one date range — rerun `--star
 few distinct regimes (e.g. the 2020-21 bull run, the 2022 bear market, a choppy stretch) before
 trusting a result.
 
+### Reserved out-of-sample holdout
+
+`config/config.yaml`'s `validation.holdout_start` marks a window that's off-limits for tuning.
+`sweep` always excludes it — no override exists, since a grid search is exploration by definition,
+exactly what the holdout exists to stay untouched by. `backtest` excludes it too unless you pass
+`--allow-holdout`, which logs the check (window + full result) to `notes/holdout_validations.md` —
+a visible audit trail, since consulting it should be a rare, deliberate final step per candidate
+strategy, not something that happens quietly while iterating.
+
+This exists because our first "out-of-sample" test wasn't actually clean: the donchian
+exit-channel-width exploration was run with `--start 2023-01-01` and no end date, which overlapped
+almost entirely with the window later used as the 2024+ holdout for Phase 3.5 — we'd already
+partially seen it. The guard makes that mistake structurally harder to repeat, rather than relying
+on remembering not to.
+
 Also test on the timeframe the strategy was actually designed for. `ema_cross`/`donchian` are meant
 for 4h/1D (spec 7a) — run at 1h and they overtrade badly: many more small-edge trades compounds
 multiplicatively into a much worse result than the same strategy on daily candles, even with

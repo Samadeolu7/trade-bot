@@ -2,6 +2,7 @@ import argparse
 import itertools
 import logging
 import os
+from pathlib import Path
 
 import pandas as pd
 
@@ -97,6 +98,51 @@ def _run_backtest_once(
     if len(by_strategy) > 1:
         summary["by_strategy"] = by_strategy
     return summary
+
+
+HOLDOUT_LOG_PATH = Path("notes/holdout_validations.md")
+
+
+def apply_holdout_guard(
+    df: pd.DataFrame, holdout_start: str | None, allow_holdout: bool, context_label: str
+) -> tuple[pd.DataFrame, bool]:
+    """Excludes any bar at/after `holdout_start` unless `allow_holdout` is
+    set, so tuning/exploration can't silently peek at the reserved
+    out-of-sample window. Returns (possibly-truncated df, whether holdout
+    data was actually included). A no-op if holdout_start is unset or the
+    data doesn't reach it anyway."""
+    if not holdout_start or len(df) == 0:
+        return df, False
+    holdout_ts = pd.Timestamp(holdout_start)
+    if df.index.max() < holdout_ts:
+        return df, False
+    if not allow_holdout:
+        excluded = int((df.index >= holdout_ts).sum())
+        logger.warning(
+            "%s: excluding %d reserved holdout bar(s) from %s onward "
+            "(pass --allow-holdout for a deliberate final confirmatory check)",
+            context_label, excluded, holdout_start,
+        )
+        return df[df.index < holdout_ts], False
+    logger.warning(
+        "%s: HOLDOUT DATA INCLUDED (from %s onward) — this should be a rare, "
+        "deliberate final check per candidate strategy, not part of routine tuning",
+        context_label, holdout_start,
+    )
+    return df, True
+
+
+def log_holdout_validation(
+    strategy_label: str, symbol: str, timeframe: str, start: str | None, end: str | None, summary: dict
+) -> None:
+    """Every deliberate holdout check gets appended here — a visible audit
+    trail of when the reserved out-of-sample data was actually consulted,
+    since that should happen rarely and deliberately, not routinely."""
+    HOLDOUT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(HOLDOUT_LOG_PATH, "a", encoding="utf-8") as f:
+        f.write(f"\n## {pd.Timestamp.now(tz='UTC').isoformat()} — {strategy_label} on {symbol} {timeframe}\n")
+        f.write(f"- window: {start or '(full history)'} to {end or '(latest)'}\n")
+        f.write(f"- result: {summary}\n")
 
 
 def _build_strategy(name: str, strategy_config: dict) -> Strategy:
@@ -208,6 +254,13 @@ def main() -> None:
     backtest_parser.add_argument(
         "--stop-band-mult", type=float, default=None, help="overrides strategy.rsi_bb.stop_band_mult"
     )
+    backtest_parser.add_argument(
+        "--allow-holdout",
+        action="store_true",
+        help="include the reserved out-of-sample window (validation.holdout_start in config.yaml) "
+        "instead of excluding it — use this only for a deliberate final confirmatory check per "
+        "candidate strategy, never during routine tuning. Logged to notes/holdout_validations.md.",
+    )
 
     sweep_parser = subparsers.add_parser(
         "sweep", help="Grid-search strategy parameters, print a ranked comparison table"
@@ -292,6 +345,11 @@ def main() -> None:
         if args.end:
             df = df[df.index <= pd.Timestamp(args.end)]
 
+        holdout_start = config.get("validation", {}).get("holdout_start")
+        df, touched_holdout = apply_holdout_guard(
+            df, holdout_start, args.allow_holdout, f"backtest {args.strategy}"
+        )
+
         strategy_config = config.get("strategy", {})
         backtest_config = config.get("backtest", {})
 
@@ -329,12 +387,23 @@ def main() -> None:
         )
         print(summary)
 
+        if touched_holdout:
+            log_holdout_validation(args.strategy, symbol, args.timeframe, args.start, args.end, summary)
+            logger.warning("Holdout check logged to %s", HOLDOUT_LOG_PATH)
+
     elif args.command == "sweep":
         df = query_candles_df(conn, exchange_id, symbol, args.timeframe)
         if args.start:
             df = df[df.index >= pd.Timestamp(args.start)]
         if args.end:
             df = df[df.index <= pd.Timestamp(args.end)]
+
+        # sweep never gets holdout access, no override flag — a grid search
+        # is exploration/tuning by definition, exactly what the reserved
+        # window exists to stay untouched by. A single deliberate --allow-holdout
+        # backtest is the only sanctioned way to consult it.
+        holdout_start = config.get("validation", {}).get("holdout_start")
+        df, _ = apply_holdout_guard(df, holdout_start, allow_holdout=False, context_label=f"sweep {args.strategy}")
 
         base_strategy_config = config.get("strategy", {})
         backtest_config = config.get("backtest", {})

@@ -56,5 +56,16 @@ backtest:
   initial_capital: 10000.0
   risk_pct: 0.01      # fraction of equity risked per trade, sized off stop distance
 
+validation:
+  # Reserved out-of-sample window — `sweep` always excludes it (no override),
+  # `backtest` excludes it unless --allow-holdout is passed, which logs the
+  # check to notes/holdout_validations.md. Meant for one deliberate final
+  # confirmatory run per candidate strategy, not routine tuning. Note that
+  # data through ~2026-09 has already been informally explored (the
+  # donchian exit-channel sweep touched 2023+ with no end date) before this
+  # guard existed — this date is where the discipline starts being enforced
+  # going forward, not a claim that everything before it is untouched.
+  holdout_start: "2026-03-01T00:00:00Z"
+
 alerting:
   heartbeat_interval_seconds: 86400  # Phase 4 (spec Section 9) — once/day is enough to confirm the process is alive
