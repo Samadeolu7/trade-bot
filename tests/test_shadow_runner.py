@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
@@ -7,6 +7,7 @@ from bot.shadow.runner import (
     _drop_incomplete_bar,
     maybe_send_daily_summary,
     maybe_send_heartbeat,
+    run_shadow_loop,
     shadow_poll_once,
 )
 from bot.storage.db import (
@@ -293,3 +294,39 @@ def test_drop_incomplete_bar_drops_bar_still_in_progress():
     result = _drop_incomplete_bar(df, "1d")
     assert len(result) == 1
     assert result.index[-1] == df.index[0]
+
+
+def test_run_shadow_loop_staggers_startup_and_jitters_interval(tmp_path):
+    """Concurrent shadow containers all restart together on every deploy, so
+    without a startup stagger they'd poll Binance in the same instant every
+    cycle indefinitely — this hit in production (2026-09-08). Verifies the
+    startup sleep and the per-iteration jitter stay within their intended
+    bounds, without ever actually sleeping."""
+    conn = make_conn(tmp_path)
+    seed_complete_history(conn, n_days=2)  # too little history -> poll is a fast no-op
+    exchange = FakeExchange(pages=[[]])
+    alerter = MagicMock()
+    strategy = ScriptedStrategy(signal_to_return=None, min_lookback=100)
+
+    sleep_calls = []
+
+    def fake_sleep(seconds):
+        sleep_calls.append(seconds)
+        if len(sleep_calls) >= 3:
+            raise KeyboardInterrupt  # escape the infinite loop after 3 sleeps
+
+    with patch("bot.shadow.runner.time.sleep", side_effect=fake_sleep):
+        try:
+            run_shadow_loop(
+                exchange, conn, alerter, "binance", "BTC/USDT", "1d", strategy, STRATEGY_LABEL,
+                fee=0.0, slippage=0.0, backfill_start_date="2020-01-01T00:00:00Z",
+                interval_seconds=300, jitter_seconds=30,
+            )
+        except KeyboardInterrupt:
+            pass
+
+    assert len(sleep_calls) == 3
+    startup_sleep, first_iteration_sleep, second_iteration_sleep = sleep_calls
+    assert 0 <= startup_sleep <= 300  # one-time stagger, up to a full interval
+    for jittered in (first_iteration_sleep, second_iteration_sleep):
+        assert 270 <= jittered <= 330  # interval +/- jitter_seconds, never negative

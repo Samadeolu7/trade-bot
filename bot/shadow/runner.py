@@ -1,4 +1,5 @@
 import logging
+import random
 import sqlite3
 import time
 
@@ -193,11 +194,20 @@ def run_shadow_loop(
     backfill_start_date: str,
     interval_seconds: int = 300,
     heartbeat_interval_seconds: int = 86400,
+    jitter_seconds: int = 30,
 ) -> None:
     logger.info(
         "starting shadow run '%s' for %s %s every %ds (paper trading only — no orders placed)",
         strategy_label, symbol, timeframe, interval_seconds,
     )
+    # Every deploy restarts all concurrent shadow containers together, so
+    # without a startup stagger they'd poll Binance's public API in the same
+    # instant every cycle indefinitely — hit in production (2026-09-08, four
+    # strategies errored simultaneously on the same klines request right
+    # after a deploy). A one-time random delay before the first iteration,
+    # plus smaller per-iteration jitter so they don't slowly re-sync, breaks
+    # that up without meaningfully changing how fresh the data stays.
+    time.sleep(random.uniform(0, interval_seconds))
     while True:
         try:
             shadow_poll_once(
@@ -209,4 +219,4 @@ def run_shadow_loop(
         except Exception as exc:
             logger.exception("shadow run iteration failed")
             alerter.send(format_error_alert(symbol, timeframe, strategy_label, str(exc)))
-        time.sleep(interval_seconds)
+        time.sleep(max(0.0, interval_seconds + random.uniform(-jitter_seconds, jitter_seconds)))

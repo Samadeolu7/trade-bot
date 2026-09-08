@@ -407,3 +407,25 @@ shadow-run candidates from the original shortlist — `donchian_adx_control`,
 `donchian_funding_filtered` — are now confirmed running independently in
 production. This closes out the shortlist; next open question is what to
 build once these have gathered enough live data to compare.
+
+## Poll jitter to fix a real production collision (2026-09-08)
+
+User forwarded four simultaneous ERROR alerts (`donchian_adx_control`,
+`donchian_natr_regime`, `vol_expansion`, `multi_timeframe`, all at the same
+minute) — a failed Binance klines request while backfilling today's candle.
+Root cause: the concurrent-shadow-run deploy restarts all containers
+together via `docker compose up -d`, so with a fixed 300s poll interval
+every container's timer stays synchronized indefinitely, and they all hit
+Binance's public API in the same instant every cycle. This time it produced
+an error (rate-limit or transient network blip); the existing per-iteration
+try/except already retried cleanly on the next cycle with no lost state —
+`donchian_funding_filtered` confirmed normal ~15 minutes later — but the
+collision itself will recur after every future deploy without a fix.
+
+Fixed in `bot/shadow/runner.py`'s `run_shadow_loop`: a one-time random
+startup delay (0 to `interval_seconds`) before the first poll, plus
+±`jitter_seconds` (default 30) randomized on every subsequent sleep so
+containers don't slowly drift back into sync. Doesn't meaningfully change
+data freshness (jitter is ~10% of a 5-minute interval). Added a test
+mocking `time.sleep` to verify both the startup and per-iteration bounds
+without actually sleeping.
