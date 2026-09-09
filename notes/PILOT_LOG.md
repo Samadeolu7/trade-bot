@@ -532,3 +532,12 @@ isolation, startup/jitter); 206 total passing. Smoke-tested end-to-end
 locally (including a real live Fear & Greed API call, since this sandbox
 can reach `alternative.me` even though it can't reach Binance) before
 deploying.
+
+**Confirmed live (2026-09-09)**: user forwarded real Telegram output —
+all five `reco_`-prefixed strategies (`reco_donchian_adx_control`,
+`reco_donchian_natr_regime`, `reco_multi_timeframe`, `reco_vol_expansion`,
+`reco_donchian_funding_filtered`) posting distinct DAILY_SUMMARY/HEARTBEAT
+messages with correct per-strategy `diag_*` fields (regime state, HTF
+trend, BB squeeze, funding rate as applicable) and `position=flat
+trades_all_time=0` as expected right after deploy. The `recommend` system
+is running independently of the five shadow-run containers, as designed.
