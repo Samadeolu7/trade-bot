@@ -597,8 +597,15 @@ Y` (the only way a stage ever changes).
 
 Smoke-tested locally end-to-end (real backtest + sweep + decide + lifecycle
 set, confirmed rows/config-hashes/commit/decisions all round-trip
-correctly) before deploying. 18 new tests, 224 total passing. One-time
-production seeding still needed: set the 5 deployed labels to `shadowing`
-and `rsi_bb`/`market_structure` to `retired` on the VPS, reflecting existing
-findings already in the spec — planned via a temporary SSH workflow, same
-pattern used earlier this session for VPS-only one-off actions.
+correctly) before deploying. 18 new tests, 224 total passing.
+
+**Production seeding confirmed (2026-09-09)**: ran the temporary SSH
+workflow — all 5 deployed labels set to `shadowing`, `rsi_bb`/
+`market_structure` set to `retired`, verified via `python main.py
+lifecycle` output. User asked whether this could affect the live shadow
+runs — confirmed it can't: lifecycle stages live under `lifecycle:{label}`
+keys in `bot_state`, a namespace nothing in `shadow_poll_once`/
+`recommend_poll_once`/any strategy ever reads (`is_automation_ready()` has
+no caller anywhere yet), and each `docker compose exec` command ran as a
+separate short-lived process alongside the already-running shadow-loop
+process, never touching it. Temporary workflow deleted.
