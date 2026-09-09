@@ -24,9 +24,15 @@
 
 set -e
 
-TRAIN_START="2020-01-01"
-TRAIN_END="2023-12-31"
-TEST_START="2024-01-01"
+# Full ISO8601 with time+Z, not bare dates: `backtest`/`sweep --start` parse
+# leniently via pandas (a bare date works fine there), but `backfill --start`
+# goes through ccxt.Exchange.parse8601, which returns None (not an error) for
+# a bare date, silently breaking the very next `since = max(since, ...)`
+# comparison with a TypeError. Found by actually running this on the VPS —
+# steps 1-6 (no backfill call) worked fine, step 7's backfill did not.
+TRAIN_START="2020-01-01T00:00:00Z"
+TRAIN_END="2023-12-31T00:00:00Z"
+TEST_START="2024-01-01T00:00:00Z"
 # No --end on the "test" runs below — config.yaml's validation.holdout_start
 # (2026-03-01) already excludes anything from there onward automatically,
 # with no --allow-holdout needed, so this stays a routine check rather than
