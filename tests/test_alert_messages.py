@@ -3,6 +3,9 @@ from bot.alerting.messages import (
     format_error_alert,
     format_exit_message,
     format_heartbeat,
+    format_recommendation_entry,
+    format_recommendation_exit,
+    format_recommendation_stop_update,
     format_signal_message,
 )
 from bot.strategy.base import Signal
@@ -94,3 +97,54 @@ def test_error_alert_structure():
     assert msg.splitlines()[0] == "ERROR"
     assert "strategy=donchian" in msg.splitlines()
     assert "detail=connection timed out" in msg.splitlines()
+
+
+def test_recommendation_entry_is_explicitly_advisory_and_carries_context():
+    signal = make_signal(context={"regime": "trending", "atr_pct": 1.23})
+    msg = format_recommendation_entry(signal, "BTC/USDT", "1d", "reco_donchian_adx_control")
+    lines = msg.splitlines()
+    assert lines[0] == "RECOMMENDATION_ENTRY"
+    assert "strategy=reco_donchian_adx_control" in lines
+    assert "direction=long" in lines
+    assert "entry=67234.50" in lines
+    assert "ctx_regime=trending" in lines
+    assert "ctx_atr_pct=1.23" in lines
+    assert "note=for your review — no order placed" in lines
+
+
+def test_recommendation_entry_includes_fear_greed_when_given():
+    signal = make_signal()
+    msg = format_recommendation_entry(
+        signal, "BTC/USDT", "1d", "reco_donchian_adx_control",
+        fear_greed={"value": 66, "classification": "Greed"},
+    )
+    assert "fear_greed=66 (Greed)" in msg.splitlines()
+
+
+def test_recommendation_entry_omits_fear_greed_when_not_given():
+    msg = format_recommendation_entry(make_signal(), "BTC/USDT", "1d", "reco_donchian_adx_control")
+    assert not any(line.startswith("fear_greed=") for line in msg.splitlines())
+
+
+def test_recommendation_exit_structure():
+    msg = format_recommendation_exit(
+        "BTC/USDT", "1d", "reco_donchian_adx_control", "long", 67234.5, 71890.0, 6.92, "stop",
+        "2026-09-10T00:00:00Z",
+    )
+    lines = msg.splitlines()
+    assert lines[0] == "RECOMMENDATION_EXIT"
+    assert "strategy=reco_donchian_adx_control" in lines
+    assert "pnl_pct=6.92" in lines
+    assert "note=for your review — no order placed" in lines
+
+
+def test_recommendation_stop_update_structure():
+    msg = format_recommendation_stop_update(
+        "BTC/USDT", "1d", "reco_multi_timeframe", "long", 60000.0, 61000.0,
+    )
+    lines = msg.splitlines()
+    assert lines[0] == "RECOMMENDATION_STOP_UPDATE"
+    assert "strategy=reco_multi_timeframe" in lines
+    assert "old_stop=60000.00" in lines
+    assert "new_stop=61000.00" in lines
+    assert "note=update your MT5 stop-loss order to match" in lines

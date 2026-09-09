@@ -470,3 +470,65 @@ offered rather than just one:
   runner).
 - 21 new tests across the five strategies' diagnose() methods plus the
   runner's dedup logic; 189 total passing.
+
+## Manual-trading recommendation system (2026-09-09)
+
+User does discretionary BTCUSD trading on MetaTrader 5 via Exness (a CFD
+venue, not spot/Quidax) and wanted the bot to send entry/exit recommendations
+for that — reviewed and executed by hand, not automated. Explicitly a
+separate product from the shadow runs, but with real resource-sharing
+potential, which is exactly how it was built. Went through plan mode given
+the size (new module, new alert types, config/deploy changes) — see
+`C:\Users\User\.claude\plans\recursive-purring-biscuit.md` for the approved
+design. A few clarifying rounds first:
+- "Perceived sentiment" turned out to mean: automated context (funding-rate
+  crowd positioning, regime state, and — added mid-plan — a real Fear &
+  Greed Index reading), not a live news/social feed; the user brings their
+  own read of social/news sentiment by pasting it into chat when they want
+  my take, rather than the bot auto-generating commentary.
+- A live Telegram↔Claude bridge was floated (an on-demand "@claude" reply
+  inside the Telegram channel) — would need a new always-on listener
+  service, an `ANTHROPIC_API_KEY`, and per-call cost. User asked, then asked
+  to pause on it — **not built**, noted as a real future feature in the spec
+  (Section 9.5) so it doesn't get silently dropped.
+- "All 5 [strategies] plus more if there are any" — resolved by making the
+  strategy list config-driven (`config.yaml`'s `recommend.strategies`), so
+  adding a 6th later is a one-line YAML change, no code.
+
+**What got built**: `bot/recommend/runner.py` (new module) — one process
+evaluates every configured strategy each cycle (one shared candle
+backfill/Binance poll, not five), reusing `Strategy`/`diagnose()` and the
+shadow runner's own `drop_incomplete_bar`/`maybe_send_near_miss_alert`/
+`maybe_send_daily_summary`/`maybe_send_heartbeat` helpers directly —
+`bot/shadow/runner.py` needed zero changes. A recommendation's "currently
+open" state reuses the exact same `paper_position`/`paper_trades`/`signals`
+tables and functions the shadow runs use, just under a `reco_`-prefixed
+`strategy_label`, so it can never collide with or be mistaken for a real
+shadow-run paper trade — the concrete "share resources" outcome the user
+was hoping for. Genuinely new: `RECOMMENDATION_STOP_UPDATE` (the shadow
+runner moves a trailing stop silently; a manually-managed MT5 position
+needs that surfaced, or the user's real stop order goes stale) and
+`RECOMMENDATION_ENTRY`/`_EXIT` (same shape as the shadow alerts, explicitly
+labeled advisory, entry merges in `Signal.context` + a Fear & Greed reading
+as the "why"). `bot/data/sentiment.py` fetches the Crypto Fear & Greed Index
+(alternative.me, public/free/no key) at most once/day into a new
+`fear_greed_index` table — advisory only, not wired into any strategy's
+entry/exit rule.
+
+Fee/slippage for the `recommend` system (`config.yaml`'s `recommend.fee`/
+`slippage`) are Exness CFD-cost placeholders (0.0 / 0.0003), explicitly
+flagged as untested guesses — the user should tune them to their actual
+account/spread once they see real fills. Deployed as one new
+`docker-compose.yml` service (`trade-bot-recommend`, one process, not five)
+alongside the five existing shadow-run services. Refactored
+`_apply_strategy_overrides` (main.py) to take a plain dict instead of an
+argparse Namespace, so `shadow`/`diagnose` (via `vars(args)`) and
+`recommend` (via each YAML strategy-list entry directly) share one
+implementation — no risk of the override logic drifting apart between the
+three commands. 26 new tests (sentiment fetch/storage, three new message
+formatters, recommend runner: entry/stop-update/exit alerts, near-miss
+reuse, multi-strategy isolation in one cycle, per-strategy failure
+isolation, startup/jitter); 206 total passing. Smoke-tested end-to-end
+locally (including a real live Fear & Greed API call, since this sandbox
+can reach `alternative.me` even though it can't reach Binance) before
+deploying.

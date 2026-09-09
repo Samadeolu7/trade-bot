@@ -16,6 +16,7 @@ from bot.data.funding import create_funding_exchange
 from bot.data.funding_backfill import backfill_funding_rates
 from bot.data.poll import run_poll_loop
 from bot.logging_setup import configure_logging
+from bot.recommend.runner import run_recommend_loop
 from bot.shadow.runner import drop_incomplete_bar, run_shadow_loop
 from bot.storage.db import connect, query_candles_df, query_funding_rates_df
 from bot.strategy.donchian import DonchianBreakoutStrategy
@@ -120,33 +121,39 @@ def _add_strategy_override_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _apply_strategy_overrides(strategy_config: dict, args: argparse.Namespace) -> dict:
-    """Applies every override from _add_strategy_override_args's flags."""
+def _apply_strategy_overrides(strategy_config: dict, overrides: dict) -> dict:
+    """Applies every override _add_strategy_override_args's flags produce.
+    `overrides` is a plain dict (argparse callers pass `vars(args)`; the
+    `recommend` command passes a YAML strategy-list entry directly) so the
+    exact same logic works for both CLI-flag-driven and config-driven
+    strategy construction — one place that can't drift out of sync."""
     strategy_config = _with_override(
-        strategy_config, "regime_switched", "trend_strategy", args.trend_strategy
+        strategy_config, "regime_switched", "trend_strategy", overrides.get("trend_strategy")
     )
     strategy_config = _with_override(
-        strategy_config, "regime_switched", "ranging_strategy", args.ranging_strategy
+        strategy_config, "regime_switched", "ranging_strategy", overrides.get("ranging_strategy")
     )
-    strategy_config = _with_override(strategy_config, "regime", "type", args.regime_type)
+    strategy_config = _with_override(strategy_config, "regime", "type", overrides.get("regime_type"))
     strategy_config = _with_override(
-        strategy_config, "donchian", "exit_channel_period", args.exit_channel_period
-    )
-    strategy_config = _with_override(strategy_config, "donchian", "exit_method", args.exit_method)
-    strategy_config = _with_override(
-        strategy_config, "donchian", "atr_period", args.donchian_atr_period
+        strategy_config, "donchian", "exit_channel_period", overrides.get("exit_channel_period")
     )
     strategy_config = _with_override(
-        strategy_config, "donchian", "atr_mult", args.donchian_atr_mult
+        strategy_config, "donchian", "exit_method", overrides.get("exit_method")
     )
     strategy_config = _with_override(
-        strategy_config, "funding_filtered", "base_strategy", args.funding_base_strategy
+        strategy_config, "donchian", "atr_period", overrides.get("donchian_atr_period")
     )
     strategy_config = _with_override(
-        strategy_config, "funding_filtered", "high_threshold", args.funding_high_threshold
+        strategy_config, "donchian", "atr_mult", overrides.get("donchian_atr_mult")
     )
     strategy_config = _with_override(
-        strategy_config, "funding_filtered", "low_threshold", args.funding_low_threshold
+        strategy_config, "funding_filtered", "base_strategy", overrides.get("funding_base_strategy")
+    )
+    strategy_config = _with_override(
+        strategy_config, "funding_filtered", "high_threshold", overrides.get("funding_high_threshold")
+    )
+    strategy_config = _with_override(
+        strategy_config, "funding_filtered", "low_threshold", overrides.get("funding_low_threshold")
     )
     return strategy_config
 
@@ -536,6 +543,19 @@ def main() -> None:
     )
     _add_strategy_override_args(diagnose_parser)
 
+    recommend_parser = subparsers.add_parser(
+        "recommend",
+        help="Advisory recommendation feed for manual trading (e.g. MetaTrader 5 via Exness) — "
+        "no orders placed, ever, on any venue, same as shadow. Runs every strategy listed in "
+        "config.yaml's recommend.strategies in a single process (shared candle data/Binance "
+        "polling), sending RECOMMENDATION_ENTRY/EXIT/STOP_UPDATE alerts for you to review and "
+        "act on yourself. Not the same as `shadow` — that's a separate, automated Quidax-fee "
+        "paper-trading simulation; this is a human-in-the-loop advisory channel.",
+    )
+    recommend_parser.add_argument("--symbol", default=None)
+    recommend_parser.add_argument("--timeframe", default=None)
+    recommend_parser.add_argument("--interval", type=int, default=None, help="seconds between checks")
+
     args = parser.parse_args()
 
     config = load_config()
@@ -682,7 +702,7 @@ def main() -> None:
     elif args.command == "shadow":
         timeframe = args.timeframe or config["poll"]["timeframe"]
         interval = args.interval or config["poll"]["interval_seconds"]
-        strategy_config = _apply_strategy_overrides(config.get("strategy", {}), args)
+        strategy_config = _apply_strategy_overrides(config.get("strategy", {}), vars(args))
         backtest_config = config.get("backtest", {})
         alerting_config = config.get("alerting", {})
         strategy_label = args.strategy_label or args.strategy
@@ -720,7 +740,7 @@ def main() -> None:
 
     elif args.command == "diagnose":
         timeframe = args.timeframe or config["poll"]["timeframe"]
-        strategy_config = _apply_strategy_overrides(config.get("strategy", {}), args)
+        strategy_config = _apply_strategy_overrides(config.get("strategy", {}), vars(args))
 
         funding_df = _load_funding_df(config, conn) if args.strategy == "funding_filtered" else None
         strategy = _build_strategy(args.strategy, strategy_config, funding_df=funding_df)
@@ -751,6 +771,50 @@ def main() -> None:
                 print("no signal right now")
             for key, value in diagnosis.items():
                 print(f"  {key}: {value}")
+
+    elif args.command == "recommend":
+        recommend_config = config.get("recommend", {})
+        timeframe = args.timeframe or recommend_config.get("timeframe") or config["poll"]["timeframe"]
+        interval = (
+            args.interval or recommend_config.get("interval_seconds") or config["poll"]["interval_seconds"]
+        )
+        fee = recommend_config.get("fee", 0.0)
+        slippage = recommend_config.get("slippage", 0.0003)
+        alerting_config = config.get("alerting", {})
+
+        strategies: list[tuple[str, Strategy]] = []
+        for entry in recommend_config.get("strategies", []):
+            label = entry["label"]
+            strategy_name = entry["strategy"]
+            strategy_config = _apply_strategy_overrides(config.get("strategy", {}), entry)
+
+            funding_df = None
+            funding_refresh_fn = None
+            if strategy_name == "funding_filtered":
+                funding_df = _load_funding_df(config, conn)
+                funding_refresh_fn = lambda: _load_funding_df(config, conn)  # noqa: E731
+
+            strategy = _build_strategy(
+                strategy_name, strategy_config, funding_df=funding_df, funding_refresh_fn=funding_refresh_fn
+            )
+            strategies.append((label, strategy))
+
+        reco_chat_id = os.environ.get("TELEGRAM_RECO_CHAT_ID") or os.environ.get("TELEGRAM_CHAT_ID")
+        alerter = TelegramAlerter(os.environ.get("TELEGRAM_BOT_TOKEN"), reco_chat_id)
+        if not alerter.enabled:
+            logger.warning(
+                "TELEGRAM_BOT_TOKEN/TELEGRAM_(RECO_)CHAT_ID not set in .env — "
+                "recommend run continues, but alerts will only be logged, not sent"
+            )
+
+        run_recommend_loop(
+            exchange, conn, alerter, exchange_id, symbol, timeframe, strategies,
+            fee=fee,
+            slippage=slippage,
+            backfill_start_date=config["backfill"]["start_date"],
+            interval_seconds=interval,
+            heartbeat_interval_seconds=alerting_config.get("heartbeat_interval_seconds", 86400),
+        )
 
 
 if __name__ == "__main__":

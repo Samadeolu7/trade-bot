@@ -72,6 +72,22 @@ services:
       - trade_bot_logs:/app/logs
     command: ["python", "main.py", "shadow", "--strategy", "funding_filtered", "--strategy-label", "donchian_funding_filtered"]
 
+  # Advisory recommendation feed for manual trading (MT5/Exness BTCUSD) — a
+  # separate product from the shadow-run paper simulations above, never
+  # places an order anywhere. One process covers every strategy listed in
+  # config.yaml's recommend.strategies (shared candle data/Binance polling),
+  # so this doesn't need one service per strategy the way shadow runs do.
+  trade-bot-recommend:
+    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
+    container_name: btc_trade_bot_recommend
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - trade_bot_data:/app/data
+      - trade_bot_logs:/app/logs
+    command: ["python", "main.py", "recommend"]
+
 volumes:
   trade_bot_data:
   trade_bot_logs:

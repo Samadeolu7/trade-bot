@@ -96,6 +96,18 @@ CREATE TABLE IF NOT EXISTS funding_rates (
 )
 """
 
+# Crypto Fear & Greed Index (alternative.me) — market-wide sentiment context
+# for the `recommend` system, advisory only (not wired into any strategy's
+# entry/exit rule). Same upsert-idempotent shape as funding_rates.
+CREATE_FEAR_GREED_TABLE = """
+CREATE TABLE IF NOT EXISTS fear_greed_index (
+    fetched_at INTEGER NOT NULL,
+    value INTEGER NOT NULL,
+    classification TEXT NOT NULL,
+    UNIQUE(fetched_at)
+)
+"""
+
 # Tiny key-value store for scheduling bookkeeping (e.g. "last heartbeat sent
 # at") that needs to survive process restarts. Keyed by the caller (e.g.
 # f"{strategy_label}:last_heartbeat_at") so concurrent shadow runs don't
@@ -140,6 +152,7 @@ def connect(db_path: str = "data/trades.db") -> sqlite3.Connection:
     conn.execute(CREATE_PAPER_POSITION_TABLE)
     conn.execute(CREATE_PAPER_TRADES_TABLE)
     conn.execute(CREATE_FUNDING_RATES_TABLE)
+    conn.execute(CREATE_FEAR_GREED_TABLE)
     conn.execute(CREATE_BOT_STATE_TABLE)
     conn.commit()
     return conn
@@ -246,6 +259,37 @@ def query_funding_rates_df(conn: sqlite3.Connection, exchange: str, symbol: str)
         "datetime64[ns, UTC]"
     )
     return df.set_index("funding_time")
+
+
+def upsert_fear_greed_entries(conn: sqlite3.Connection, entries: list[dict]) -> int:
+    """entries: alternative.me Fear & Greed API entries — dicts with 'value'
+    (str), 'value_classification' (str), and 'timestamp' (str, epoch
+    seconds) keys."""
+    if not entries:
+        return 0
+    rows = [
+        (int(e["timestamp"]), int(e["value"]), e["value_classification"]) for e in entries
+    ]
+    conn.executemany(
+        """
+        INSERT OR REPLACE INTO fear_greed_index (fetched_at, value, classification)
+        VALUES (?, ?, ?)
+        """,
+        rows,
+    )
+    conn.commit()
+    return len(rows)
+
+
+def get_latest_fear_greed(conn: sqlite3.Connection) -> dict | None:
+    cur = conn.execute(
+        "SELECT fetched_at, value, classification FROM fear_greed_index ORDER BY fetched_at DESC LIMIT 1"
+    )
+    row = cur.fetchone()
+    if row is None:
+        return None
+    fetched_at, value, classification = row
+    return {"fetched_at": fetched_at, "value": value, "classification": classification}
 
 
 def _to_epoch_ms(timestamp) -> int:

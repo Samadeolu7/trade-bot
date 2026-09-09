@@ -111,6 +111,90 @@ def format_near_miss_alert(symbol: str, timeframe: str, strategy_label: str, dia
     return _kv_lines("NEAR_MISS", fields)
 
 
+def format_recommendation_entry(
+    signal: Signal,
+    symbol: str,
+    timeframe: str,
+    strategy_label: str,
+    fear_greed: dict | None = None,
+) -> str:
+    """For the `recommend` system (manual trading via MT5/Exness, not the
+    automated shadow runs) — always explicit that this is advisory, and
+    merges in Signal.context (regime, ATR%, funding rate, etc. — whatever
+    that strategy already populates) plus market-wide sentiment, since the
+    whole point is giving the user enough "why" to decide for themselves."""
+    fields = {
+        "strategy": strategy_label,
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "direction": signal.direction,
+        "entry": f"{signal.entry_price:.2f}",
+        "stop": f"{signal.stop_loss:.2f}",
+        "target": f"{signal.take_profit:.2f}" if signal.take_profit is not None else None,
+        "reason": signal.reason,
+        "time": signal.timestamp,
+    }
+    for key, value in signal.context.items():
+        fields[f"ctx_{key}"] = value
+    if fear_greed is not None:
+        fields["fear_greed"] = f"{fear_greed['value']} ({fear_greed['classification']})"
+    fields["note"] = "for your review — no order placed"
+    return _kv_lines("RECOMMENDATION_ENTRY", fields)
+
+
+def format_recommendation_exit(
+    symbol: str,
+    timeframe: str,
+    strategy_label: str,
+    direction: str,
+    entry_price: float,
+    exit_price: float,
+    pnl_pct: float,
+    exit_reason: str,
+    exit_time,
+) -> str:
+    return _kv_lines(
+        "RECOMMENDATION_EXIT",
+        {
+            "strategy": strategy_label,
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "direction": direction,
+            "entry": f"{entry_price:.2f}",
+            "exit": f"{exit_price:.2f}",
+            "pnl_pct": f"{pnl_pct:.2f}",
+            "reason": exit_reason,
+            "time": exit_time,
+            "note": "for your review — no order placed",
+        },
+    )
+
+
+def format_recommendation_stop_update(
+    symbol: str,
+    timeframe: str,
+    strategy_label: str,
+    direction: str,
+    old_stop: float,
+    new_stop: float,
+) -> str:
+    """The shadow runner updates a trailing stop silently in the DB — for a
+    manually-managed MT5 position, the moved stop has to actually reach the
+    user or their real stop order goes stale."""
+    return _kv_lines(
+        "RECOMMENDATION_STOP_UPDATE",
+        {
+            "strategy": strategy_label,
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "direction": direction,
+            "old_stop": f"{old_stop:.2f}",
+            "new_stop": f"{new_stop:.2f}",
+            "note": "update your MT5 stop-loss order to match",
+        },
+    )
+
+
 def format_heartbeat(symbol: str, timeframe: str, strategy_label: str) -> str:
     return _kv_lines(
         "HEARTBEAT", {"strategy": strategy_label, "symbol": symbol, "timeframe": timeframe, "status": "alive"}

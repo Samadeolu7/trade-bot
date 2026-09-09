@@ -97,3 +97,28 @@ validation:
 
 alerting:
   heartbeat_interval_seconds: 86400  # Phase 4 (spec Section 9) — once/day is enough to confirm the process is alive
+
+# Advisory recommendation feed for manual trading (MT5/Exness BTCUSD) —
+# separate from the automated `shadow` paper-trading simulations above.
+# Never places an order anywhere; alerts are for the user's own review.
+# `fee`/`slippage` approximate Exness CFD costs (not Quidax's spot fee) and
+# are untested placeholders — tune to your actual account/spread.
+recommend:
+  fee: 0.0
+  slippage: 0.0003
+  # timeframe/interval_seconds default to poll.* above if omitted here.
+  # Each entry mirrors one of the concurrent shadow-run configs in
+  # docker-compose.yml; add more (any STRATEGY_CHOICES value, e.g. ema_cross,
+  # market_structure) as new candidates without touching any code.
+  strategies:
+    - label: donchian_adx_control
+      strategy: regime_switched
+    - label: donchian_natr_regime
+      strategy: regime_switched
+      regime_type: natr
+    - label: multi_timeframe
+      strategy: multi_timeframe
+    - label: vol_expansion
+      strategy: vol_expansion
+    - label: donchian_funding_filtered
+      strategy: funding_filtered
