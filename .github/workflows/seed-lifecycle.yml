@@ -1,0 +1,37 @@
+name: Seed Strategy Lifecycle Stages
+
+on:
+  workflow_dispatch:
+
+env:
+  DEPLOY_PATH: /opt/btc-trade-bot
+
+jobs:
+  seed:
+    name: One-time lifecycle seeding
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set lifecycle stages to match reality
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          command_timeout: 3m
+          script: |
+            set -e
+            cd ${{ env.DEPLOY_PATH }}
+
+            echo "=== Seeding deployed shadow-run labels to 'shadowing' ==="
+            docker compose exec -T trade-bot python main.py lifecycle set --label donchian_adx_control --stage shadowing
+            docker compose exec -T trade-bot python main.py lifecycle set --label donchian_natr_regime --stage shadowing
+            docker compose exec -T trade-bot python main.py lifecycle set --label multi_timeframe --stage shadowing
+            docker compose exec -T trade-bot python main.py lifecycle set --label vol_expansion --stage shadowing
+            docker compose exec -T trade-bot python main.py lifecycle set --label donchian_funding_filtered --stage shadowing
+
+            echo "=== Seeding retired strategies per existing spec findings ==="
+            docker compose exec -T trade-bot python main.py lifecycle set --label rsi_bb --stage retired
+            docker compose exec -T trade-bot python main.py lifecycle set --label market_structure --stage retired
+
+            echo "=== Current lifecycle stages ==="
+            docker compose exec -T trade-bot python main.py lifecycle
