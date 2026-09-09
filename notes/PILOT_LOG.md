@@ -541,3 +541,64 @@ messages with correct per-strategy `diag_*` fields (regime state, HTF
 trend, BB squeeze, funding rate as applicable) and `position=flat
 trades_all_time=0` as expected right after deploy. The `recommend` system
 is running independently of the five shadow-run containers, as designed.
+
+## Experiment log + strategy lifecycle tracking (2026-09-09)
+
+User reviewed the spec (with input from another AI's architecture critique)
+and concluded the project's real strength is the research infrastructure —
+holdout enforcement, independent concurrent shadow state, diagnostics — not
+any individual strategy, and pushed for formalizing that: hypothesis →
+experiment → evidence → decision, an experiment registry, tracking research
+degrees of freedom (how many things have actually been tried, given the
+sweep architecture can silently rack up hundreds of combinations), a
+"graveyard" for rejected ideas, and an explicit lifecycle gating eventual
+automation. Agreed this was the right instinct but too much platform to
+build against the amount of evidence currently in hand (5 strategies, ~1
+week of shadow data) — scoped down to two pieces, went through plan mode
+given the size: see `C:\Users\User\.claude\plans\recursive-purring-biscuit.md`.
+Explicitly deferred: an evidence-score formula, parameter-neighborhood
+stability heatmaps, counterfactual outcome tracking for near-misses/vetoed
+signals, a strategy tournament view — revisit once `experiments` actually
+has enough rows to justify them.
+
+**Part 1 — experiment log.** New `experiments` table (`bot/storage/db.py`):
+one row per `backtest` run, one row per `sweep` *combination* (not per sweep
+invocation) — that's what makes "432 experiments attempted" a real,
+queryable count instead of something that happened in a terminal that's
+since been closed. Each row: config (JSON + a sha256 dedup hash), the
+queried candle window as a `data_version` fingerprint, a best-effort git
+commit (`git rev-parse --short HEAD` — `None` inside the deployed
+containers, since `.dockerignore` excludes `.git`; this is a local-research
+feature, and that's where it matters), and the full result dict. Wired into
+`main.py`'s existing `backtest`/`sweep` dispatch with zero change to their
+core logic — one `_record_experiment(...)` call each, wrapped in try/except
+so a logging failure can never break the actual backtest/sweep output.
+`decision`/`decision_reason` are never set automatically by anything — a
+good backtest does not self-promote a strategy; the only way they get set
+is a human running `python main.py experiments decide --id N --decision ...
+--reason ...`. Rejected experiments are never deleted; the "graveyard" is
+just `experiments` rows with `decision="rejected"`, not a separate feature.
+New CLI: `python main.py experiments [--strategy X] [--kind backtest|sweep]
+[--limit N]` — prints a one-line "N experiments logged (M backtest, K
+sweep)" count, then a table of recent rows.
+
+**Part 2 — strategy lifecycle.** No new table — reuses the existing
+`bot_state` key-value store (`lifecycle:{label}` keys), plus a new generic
+`query_state_prefix(conn, prefix)` helper in `db.py` to list every lifecycle
+entry at once. New module `bot/research/lifecycle.py`: a fixed 9-stage enum
+(`research → backtested → holdout_passed → shadowing → shadow_review →
+approved → automation_ready → disabled/retired`), `get`/`set`/
+`list_lifecycle_stages`, and `is_automation_ready(conn, label)` — pure
+scaffolding for a future Phase 5 gate, no caller anywhere in the codebase
+yet, true only once a human has explicitly set a strategy's stage to
+`automation_ready` (never computed, never inferred from performance). New
+CLI: `python main.py lifecycle` (list) / `lifecycle set --label X --stage
+Y` (the only way a stage ever changes).
+
+Smoke-tested locally end-to-end (real backtest + sweep + decide + lifecycle
+set, confirmed rows/config-hashes/commit/decisions all round-trip
+correctly) before deploying. 18 new tests, 224 total passing. One-time
+production seeding still needed: set the 5 deployed labels to `shadowing`
+and `rsi_bb`/`market_structure` to `retired` on the VPS, reflecting existing
+findings already in the spec — planned via a temporary SSH workflow, same
+pattern used earlier this session for VPS-only one-off actions.

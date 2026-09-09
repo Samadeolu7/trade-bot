@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -108,6 +109,38 @@ CREATE TABLE IF NOT EXISTS fear_greed_index (
 )
 """
 
+# Immutable-ish record of every backtest/sweep run (research infrastructure,
+# 2026-09-09): so "why did we reject this" is reconstructable later, and
+# "how many things have we tried" (multiple-testing/selection-bias exposure)
+# is a real queryable count instead of implicit. One row per backtest, one
+# row per sweep *combination* (not per sweep invocation) — that's what makes
+# the attempted-count meaningful. decision/decision_reason are never set
+# automatically; a good backtest does not self-promote a strategy.
+CREATE_EXPERIMENTS_TABLE = """
+CREATE TABLE IF NOT EXISTS experiments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    strategy TEXT NOT NULL,
+    strategy_label TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    timeframe TEXT NOT NULL,
+    window_start TEXT,
+    window_end TEXT,
+    touched_holdout INTEGER NOT NULL DEFAULT 0,
+    config_json TEXT NOT NULL,
+    config_hash TEXT NOT NULL,
+    data_version TEXT,
+    code_commit TEXT,
+    rank_metric TEXT,
+    rank_value REAL,
+    result_json TEXT NOT NULL,
+    decision TEXT,
+    decision_reason TEXT,
+    decided_at INTEGER
+)
+"""
+
 # Tiny key-value store for scheduling bookkeeping (e.g. "last heartbeat sent
 # at") that needs to survive process restarts. Keyed by the caller (e.g.
 # f"{strategy_label}:last_heartbeat_at") so concurrent shadow runs don't
@@ -153,6 +186,7 @@ def connect(db_path: str = "data/trades.db") -> sqlite3.Connection:
     conn.execute(CREATE_PAPER_TRADES_TABLE)
     conn.execute(CREATE_FUNDING_RATES_TABLE)
     conn.execute(CREATE_FEAR_GREED_TABLE)
+    conn.execute(CREATE_EXPERIMENTS_TABLE)
     conn.execute(CREATE_BOT_STATE_TABLE)
     conn.commit()
     return conn
@@ -486,3 +520,101 @@ def get_state(conn: sqlite3.Connection, key: str) -> str | None:
 def set_state(conn: sqlite3.Connection, key: str, value: str) -> None:
     conn.execute("INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)", (key, value))
     conn.commit()
+
+
+def query_state_prefix(conn: sqlite3.Connection, prefix: str) -> dict[str, str]:
+    """Every bot_state row whose key starts with `prefix` — e.g. every
+    strategy's lifecycle stage at once, keyed as "lifecycle:{label}"."""
+    cur = conn.execute("SELECT key, value FROM bot_state WHERE key LIKE ?", (f"{prefix}%",))
+    return {key: value for key, value in cur.fetchall()}
+
+
+_EXPERIMENT_COLUMNS = (
+    "id", "created_at", "kind", "strategy", "strategy_label", "symbol", "timeframe",
+    "window_start", "window_end", "touched_holdout", "config_json", "config_hash",
+    "data_version", "code_commit", "rank_metric", "rank_value", "result_json",
+    "decision", "decision_reason", "decided_at",
+)
+
+
+def record_experiment(
+    conn: sqlite3.Connection,
+    kind: str,
+    strategy: str,
+    strategy_label: str,
+    symbol: str,
+    timeframe: str,
+    window_start: str | None,
+    window_end: str | None,
+    touched_holdout: bool,
+    config_json: str,
+    config_hash: str,
+    data_version: str | None,
+    code_commit: str | None,
+    result_json: str,
+    rank_metric: str | None = None,
+    rank_value: float | None = None,
+) -> int:
+    cur = conn.execute(
+        """
+        INSERT INTO experiments
+            (created_at, kind, strategy, strategy_label, symbol, timeframe, window_start,
+             window_end, touched_holdout, config_json, config_hash, data_version, code_commit,
+             rank_metric, rank_value, result_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            int(time.time() * 1000), kind, strategy, strategy_label, symbol, timeframe,
+            window_start, window_end, int(touched_holdout), config_json, config_hash,
+            data_version, code_commit, rank_metric, rank_value, result_json,
+        ),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def _row_to_experiment(row: tuple) -> dict:
+    return dict(zip(_EXPERIMENT_COLUMNS, row))
+
+
+def get_experiment(conn: sqlite3.Connection, experiment_id: int) -> dict | None:
+    cur = conn.execute(
+        f"SELECT {', '.join(_EXPERIMENT_COLUMNS)} FROM experiments WHERE id = ?", (experiment_id,)
+    )
+    row = cur.fetchone()
+    return _row_to_experiment(row) if row else None
+
+
+def list_experiments(
+    conn: sqlite3.Connection, strategy: str | None = None, kind: str | None = None, limit: int = 50
+) -> list[dict]:
+    query = f"SELECT {', '.join(_EXPERIMENT_COLUMNS)} FROM experiments WHERE 1=1"
+    params: list = []
+    if strategy is not None:
+        query += " AND strategy = ?"
+        params.append(strategy)
+    if kind is not None:
+        query += " AND kind = ?"
+        params.append(kind)
+    query += " ORDER BY id DESC LIMIT ?"
+    params.append(limit)
+    cur = conn.execute(query, params)
+    return [_row_to_experiment(row) for row in cur.fetchall()]
+
+
+def count_experiments(conn: sqlite3.Connection) -> dict[str, int]:
+    cur = conn.execute("SELECT kind, COUNT(*) FROM experiments GROUP BY kind")
+    counts = {kind: count for kind, count in cur.fetchall()}
+    counts["total"] = sum(counts.values())
+    return counts
+
+
+def set_experiment_decision(
+    conn: sqlite3.Connection, experiment_id: int, decision: str, reason: str | None
+) -> bool:
+    cur = conn.execute(
+        "UPDATE experiments SET decision = ?, decision_reason = ?, decided_at = ? WHERE id = ?",
+        (decision, reason, int(time.time() * 1000), experiment_id),
+    )
+    conn.commit()
+    return cur.rowcount > 0

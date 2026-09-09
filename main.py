@@ -1,7 +1,10 @@
 import argparse
+import hashlib
 import itertools
+import json
 import logging
 import os
+import subprocess
 from pathlib import Path
 
 import pandas as pd
@@ -17,8 +20,21 @@ from bot.data.funding_backfill import backfill_funding_rates
 from bot.data.poll import run_poll_loop
 from bot.logging_setup import configure_logging
 from bot.recommend.runner import run_recommend_loop
+from bot.research.lifecycle import (
+    STAGES as LIFECYCLE_STAGES,
+    list_lifecycle_stages,
+    set_lifecycle_stage,
+)
 from bot.shadow.runner import drop_incomplete_bar, run_shadow_loop
-from bot.storage.db import connect, query_candles_df, query_funding_rates_df
+from bot.storage.db import (
+    connect,
+    count_experiments,
+    list_experiments,
+    query_candles_df,
+    query_funding_rates_df,
+    record_experiment,
+    set_experiment_decision,
+)
 from bot.strategy.donchian import DonchianBreakoutStrategy
 from bot.strategy.ema_cross import EmaCrossStrategy
 from bot.strategy.flat import FlatStrategy
@@ -249,6 +265,65 @@ def _run_backtest_once(
     if len(by_strategy) > 1:
         summary["by_strategy"] = by_strategy
     return summary
+
+
+def _git_commit_hash() -> str | None:
+    """Best-effort — the deployed Docker image has no .git (see
+    .dockerignore), so this is None there. It matters for local
+    backtest/sweep research runs, which is where experiments are actually
+    recorded from."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=3, cwd=Path(__file__).resolve().parent,
+        )
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip() or None
+    except Exception:
+        return None
+
+
+def _record_experiment(
+    conn,
+    kind: str,
+    strategy: str,
+    strategy_label: str,
+    symbol: str,
+    timeframe: str,
+    df: pd.DataFrame,
+    touched_holdout: bool,
+    strategy_config: dict,
+    summary: dict,
+    rank_metric: str | None = None,
+    rank_value: float | None = None,
+) -> None:
+    """Records one row to the experiments table — never lets a logging
+    failure break the actual backtest/sweep output it's describing."""
+    try:
+        config_json = json.dumps(strategy_config, sort_keys=True, default=str)
+        config_hash = hashlib.sha256(config_json.encode()).hexdigest()[:12]
+        data_version = f"{len(df)} bars, {df.index.min()}–{df.index.max()}" if len(df) else "empty"
+        record_experiment(
+            conn,
+            kind=kind,
+            strategy=strategy,
+            strategy_label=strategy_label,
+            symbol=symbol,
+            timeframe=timeframe,
+            window_start=str(df.index.min()) if len(df) else None,
+            window_end=str(df.index.max()) if len(df) else None,
+            touched_holdout=touched_holdout,
+            config_json=config_json,
+            config_hash=config_hash,
+            data_version=data_version,
+            code_commit=_git_commit_hash(),
+            result_json=json.dumps(summary, default=str),
+            rank_metric=rank_metric,
+            rank_value=rank_value,
+        )
+    except Exception:
+        logger.exception("failed to record experiment — continuing, this is diagnostic only")
 
 
 HOLDOUT_LOG_PATH = Path("notes/holdout_validations.md")
@@ -556,13 +631,45 @@ def main() -> None:
     recommend_parser.add_argument("--timeframe", default=None)
     recommend_parser.add_argument("--interval", type=int, default=None, help="seconds between checks")
 
+    experiments_parser = subparsers.add_parser(
+        "experiments",
+        help="Research log — every backtest/sweep run is recorded (config, data window, git commit, "
+        "result), so 'why did we reject this' is reconstructable later and 'how many things have we "
+        "tried' is a real count instead of implicit. Bare command lists recent experiments; "
+        "`experiments decide` records a human decision against one.",
+    )
+    experiments_parser.add_argument("--strategy", default=None, help="filter by strategy name")
+    experiments_parser.add_argument("--kind", choices=["backtest", "sweep"], default=None)
+    experiments_parser.add_argument("--limit", type=int, default=20)
+    experiments_sub = experiments_parser.add_subparsers(dest="experiments_command")
+    experiments_sub.required = False
+    decide_parser = experiments_sub.add_parser(
+        "decide", help="Record a decision against a past experiment — never set automatically"
+    )
+    decide_parser.add_argument("--id", type=int, required=True, dest="experiment_id")
+    decide_parser.add_argument("--decision", required=True, help='e.g. "control", "rejected", "shadow_testing"')
+    decide_parser.add_argument("--reason", default=None)
+
+    lifecycle_parser = subparsers.add_parser(
+        "lifecycle",
+        help="A strategy's stage from idea to (eventually, if ever) safe-to-automate. Never advanced "
+        "automatically by backtest/sweep/shadow/recommend — every transition is an explicit human call. "
+        "Bare command lists every labeled strategy's current stage.",
+    )
+    lifecycle_sub = lifecycle_parser.add_subparsers(dest="lifecycle_command")
+    lifecycle_sub.required = False
+    lifecycle_set_parser = lifecycle_sub.add_parser("set", help="Set a strategy's lifecycle stage")
+    lifecycle_set_parser.add_argument("--label", required=True)
+    lifecycle_set_parser.add_argument("--stage", required=True, choices=LIFECYCLE_STAGES)
+
     args = parser.parse_args()
 
     config = load_config()
     configure_logging(**config["logging"])
 
     exchange_id = config["exchange"]["id"]
-    symbol = args.symbol or config["exchange"]["symbol"]
+    # experiments/lifecycle are pure DB-log commands — no --symbol of their own
+    symbol = getattr(args, "symbol", None) or config["exchange"]["symbol"]
     exchange = create_exchange(exchange_id)
     conn = connect(config["storage"]["db_path"])
 
@@ -633,6 +740,10 @@ def main() -> None:
         summary = _run_backtest_once(
             df, args.strategy, strategy_config, backtest_config, args.timeframe, funding_df
         )
+        _record_experiment(
+            conn, "backtest", args.strategy, args.strategy, symbol, args.timeframe, df,
+            touched_holdout, strategy_config, summary,
+        )
 
         logger.info(
             "backtest complete: %s %s %s over %d candles -> %s",
@@ -686,6 +797,11 @@ def main() -> None:
 
             summary = _run_backtest_once(
                 df, args.strategy, strategy_config, backtest_config, args.timeframe, funding_df
+            )
+            _record_experiment(
+                conn, "sweep", args.strategy, args.strategy, symbol, args.timeframe, df,
+                touched_holdout=False, strategy_config=strategy_config, summary=summary,
+                rank_metric=args.rank_by, rank_value=summary.get(args.rank_by, 0.0),
             )
             params_label = ", ".join(f"{s}.{k}={v}" for (s, k), v in zip(sections_keys, combo))
             rows.append((params_label or "(defaults)", summary))
@@ -815,6 +931,48 @@ def main() -> None:
             interval_seconds=interval,
             heartbeat_interval_seconds=alerting_config.get("heartbeat_interval_seconds", 86400),
         )
+
+    elif args.command == "experiments":
+        if getattr(args, "experiments_command", None) == "decide":
+            found = set_experiment_decision(conn, args.experiment_id, args.decision, args.reason)
+            if found:
+                print(f"experiment {args.experiment_id} -> decision={args.decision!r} reason={args.reason!r}")
+            else:
+                print(f"no experiment with id {args.experiment_id}")
+        else:
+            counts = count_experiments(conn)
+            print(
+                f"{counts.get('total', 0)} experiments logged "
+                f"({counts.get('backtest', 0)} backtest, {counts.get('sweep', 0)} sweep)"
+            )
+            rows = list_experiments(conn, strategy=args.strategy, kind=args.kind, limit=args.limit)
+            if not rows:
+                print("no experiments match those filters")
+            for row in rows:
+                result = json.loads(row["result_json"])
+                when = pd.Timestamp(row["created_at"], unit="ms", tz="UTC").strftime("%Y-%m-%d %H:%M")
+                metrics = " ".join(
+                    f"{key}={result[key]}" for key in
+                    ("total_return_pct", "profit_factor", "sharpe_ratio", "max_drawdown_pct")
+                    if key in result
+                )
+                decision = row["decision"] or "—"
+                print(
+                    f"[{row['id']:>4}] {when}  {row['kind']:<8} {row['strategy_label']:<26} "
+                    f"{row['symbol']} {row['timeframe']}  {metrics}  decision={decision}  "
+                    f"cfg={row['config_hash']}  commit={row['code_commit'] or '—'}"
+                )
+
+    elif args.command == "lifecycle":
+        if getattr(args, "lifecycle_command", None) == "set":
+            set_lifecycle_stage(conn, args.label, args.stage)
+            print(f"{args.label} -> {args.stage}")
+        else:
+            stages = list_lifecycle_stages(conn)
+            if not stages:
+                print("no lifecycle stages set yet — python main.py lifecycle set --label <label> --stage <stage>")
+            for label, stage in sorted(stages.items()):
+                print(f"{label:<28} {stage}")
 
 
 if __name__ == "__main__":
