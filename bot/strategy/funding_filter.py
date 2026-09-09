@@ -96,3 +96,35 @@ class FundingFilteredStrategy(Strategy):
 
     def trail_stop(self, df: pd.DataFrame, direction: Direction, current_stop: float) -> float:
         return self.base.trail_stop(df, direction, current_stop)
+
+    def diagnose(self, df: pd.DataFrame) -> dict:
+        """Merges the base strategy's own diagnose with the current funding
+        rate, and — this is the interesting case — overrides the near-miss
+        with an explicit "would have fired but funding vetoed it" whenever
+        that's what's actually happening. That's a materially different (and
+        more actionable) situation than the base's own generic near-miss, so
+        it takes precedence when both are true."""
+        result = dict(self.base.diagnose(df))
+        rate = self._funding_rate_at(df.index[-1])
+        result["funding_rate"] = rate
+        if rate is None:
+            return result
+
+        base_signal = self.base.generate_signal(df)
+        if base_signal is None:
+            return result
+        if base_signal.direction == "long" and rate > self.high_threshold:
+            result["near_miss"] = True
+            result["near_miss_key"] = "long_signal_vetoed_by_funding"
+            result["near_miss_reason"] = (
+                f"{self.base.name} would enter long here, but funding rate {rate:.5f} "
+                f"exceeds the veto threshold {self.high_threshold:.5f} (crowded-long risk)"
+            )
+        elif base_signal.direction == "short" and rate < self.low_threshold:
+            result["near_miss"] = True
+            result["near_miss_key"] = "short_signal_vetoed_by_funding"
+            result["near_miss_reason"] = (
+                f"{self.base.name} would enter short here, but funding rate {rate:.5f} "
+                f"is below the veto threshold {self.low_threshold:.5f} (crowded-short risk)"
+            )
+        return result

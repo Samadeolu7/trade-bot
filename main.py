@@ -16,7 +16,7 @@ from bot.data.funding import create_funding_exchange
 from bot.data.funding_backfill import backfill_funding_rates
 from bot.data.poll import run_poll_loop
 from bot.logging_setup import configure_logging
-from bot.shadow.runner import run_shadow_loop
+from bot.shadow.runner import drop_incomplete_bar, run_shadow_loop
 from bot.storage.db import connect, query_candles_df, query_funding_rates_df
 from bot.strategy.donchian import DonchianBreakoutStrategy
 from bot.strategy.ema_cross import EmaCrossStrategy
@@ -51,6 +51,104 @@ def _build_trend_strategy(name: str, strategy_config: dict) -> Strategy:
     if name == "vol_expansion":
         return VolatilityExpansionBreakoutStrategy(strategy_config.get("vol_expansion", {}))
     return EmaCrossStrategy(strategy_config.get("ema_cross", {}))
+
+
+def _add_strategy_override_args(parser: argparse.ArgumentParser) -> None:
+    """Shared by `shadow` and `diagnose` — both need to build the exact same
+    strategy from the exact same config/override plumbing, so a diagnosis
+    reflects what a live shadow run would actually do."""
+    parser.add_argument(
+        "--trend-strategy",
+        choices=TREND_STRATEGY_CHOICES,
+        default=None,
+        help="only for --strategy regime_switched: overrides strategy.regime_switched.trend_strategy",
+    )
+    parser.add_argument(
+        "--ranging-strategy",
+        choices=["flat", "rsi_bb"],
+        default=None,
+        help="only for --strategy regime_switched: overrides strategy.regime_switched.ranging_strategy",
+    )
+    parser.add_argument(
+        "--regime-type",
+        choices=["adx", "sma200", "natr"],
+        default=None,
+        help="only for --strategy regime_switched: overrides strategy.regime.type",
+    )
+    parser.add_argument(
+        "--exit-channel-period",
+        type=int,
+        default=None,
+        help="donchian (standalone or as regime_switched's trend strategy): "
+        "overrides strategy.donchian.exit_channel_period",
+    )
+    parser.add_argument(
+        "--exit-method",
+        choices=["channel", "atr"],
+        default=None,
+        help="donchian: overrides strategy.donchian.exit_method",
+    )
+    parser.add_argument(
+        "--donchian-atr-period",
+        type=int,
+        default=None,
+        help="donchian with --exit-method atr: overrides strategy.donchian.atr_period",
+    )
+    parser.add_argument(
+        "--donchian-atr-mult",
+        type=float,
+        default=None,
+        help="donchian with --exit-method atr: overrides strategy.donchian.atr_mult",
+    )
+    parser.add_argument(
+        "--funding-base-strategy",
+        choices=TREND_STRATEGY_CHOICES,
+        default=None,
+        help="only for --strategy funding_filtered: overrides strategy.funding_filtered.base_strategy",
+    )
+    parser.add_argument(
+        "--funding-high-threshold",
+        type=float,
+        default=None,
+        help="only for --strategy funding_filtered: overrides strategy.funding_filtered.high_threshold",
+    )
+    parser.add_argument(
+        "--funding-low-threshold",
+        type=float,
+        default=None,
+        help="only for --strategy funding_filtered: overrides strategy.funding_filtered.low_threshold",
+    )
+
+
+def _apply_strategy_overrides(strategy_config: dict, args: argparse.Namespace) -> dict:
+    """Applies every override from _add_strategy_override_args's flags."""
+    strategy_config = _with_override(
+        strategy_config, "regime_switched", "trend_strategy", args.trend_strategy
+    )
+    strategy_config = _with_override(
+        strategy_config, "regime_switched", "ranging_strategy", args.ranging_strategy
+    )
+    strategy_config = _with_override(strategy_config, "regime", "type", args.regime_type)
+    strategy_config = _with_override(
+        strategy_config, "donchian", "exit_channel_period", args.exit_channel_period
+    )
+    strategy_config = _with_override(strategy_config, "donchian", "exit_method", args.exit_method)
+    strategy_config = _with_override(
+        strategy_config, "donchian", "atr_period", args.donchian_atr_period
+    )
+    strategy_config = _with_override(
+        strategy_config, "donchian", "atr_mult", args.donchian_atr_mult
+    )
+    strategy_config = _with_override(
+        strategy_config, "funding_filtered", "base_strategy", args.funding_base_strategy
+    )
+    strategy_config = _with_override(
+        strategy_config, "funding_filtered", "high_threshold", args.funding_high_threshold
+    )
+    strategy_config = _with_override(
+        strategy_config, "funding_filtered", "low_threshold", args.funding_low_threshold
+    )
+    return strategy_config
 
 
 def _empty_funding_df() -> pd.DataFrame:
@@ -422,67 +520,21 @@ def main() -> None:
         help="identifies this run's paper-trading state (DB rows, Telegram messages) so concurrent "
         "shadow runs don't collide; defaults to --strategy's name",
     )
-    shadow_parser.add_argument(
-        "--trend-strategy",
-        choices=TREND_STRATEGY_CHOICES,
-        default=None,
-        help="only for --strategy regime_switched: overrides strategy.regime_switched.trend_strategy",
+    _add_strategy_override_args(shadow_parser)
+
+    diagnose_parser = subparsers.add_parser(
+        "diagnose",
+        help="Print a strategy's current read of the market right now — regime state, distance to "
+        "entry, near-miss state — without waiting for a live signal or an alert. For manually "
+        "sanity-checking the bot against your own reading of the chart (e.g. \"BTC looks like it's "
+        "pulling back after a trend, why hasn't multi_timeframe fired?\").",
     )
-    shadow_parser.add_argument(
-        "--ranging-strategy",
-        choices=["flat", "rsi_bb"],
-        default=None,
-        help="only for --strategy regime_switched: overrides strategy.regime_switched.ranging_strategy",
+    diagnose_parser.add_argument("--symbol", default=None)
+    diagnose_parser.add_argument("--timeframe", default=None)
+    diagnose_parser.add_argument(
+        "--strategy", choices=STRATEGY_CHOICES, default="regime_switched",
     )
-    shadow_parser.add_argument(
-        "--regime-type",
-        choices=["adx", "sma200", "natr"],
-        default=None,
-        help="only for --strategy regime_switched: overrides strategy.regime.type",
-    )
-    shadow_parser.add_argument(
-        "--exit-channel-period",
-        type=int,
-        default=None,
-        help="donchian (standalone or as regime_switched's trend strategy): "
-        "overrides strategy.donchian.exit_channel_period",
-    )
-    shadow_parser.add_argument(
-        "--exit-method",
-        choices=["channel", "atr"],
-        default=None,
-        help="donchian: overrides strategy.donchian.exit_method",
-    )
-    shadow_parser.add_argument(
-        "--donchian-atr-period",
-        type=int,
-        default=None,
-        help="donchian with --exit-method atr: overrides strategy.donchian.atr_period",
-    )
-    shadow_parser.add_argument(
-        "--donchian-atr-mult",
-        type=float,
-        default=None,
-        help="donchian with --exit-method atr: overrides strategy.donchian.atr_mult",
-    )
-    shadow_parser.add_argument(
-        "--funding-base-strategy",
-        choices=TREND_STRATEGY_CHOICES,
-        default=None,
-        help="only for --strategy funding_filtered: overrides strategy.funding_filtered.base_strategy",
-    )
-    shadow_parser.add_argument(
-        "--funding-high-threshold",
-        type=float,
-        default=None,
-        help="only for --strategy funding_filtered: overrides strategy.funding_filtered.high_threshold",
-    )
-    shadow_parser.add_argument(
-        "--funding-low-threshold",
-        type=float,
-        default=None,
-        help="only for --strategy funding_filtered: overrides strategy.funding_filtered.low_threshold",
-    )
+    _add_strategy_override_args(diagnose_parser)
 
     args = parser.parse_args()
 
@@ -630,37 +682,10 @@ def main() -> None:
     elif args.command == "shadow":
         timeframe = args.timeframe or config["poll"]["timeframe"]
         interval = args.interval or config["poll"]["interval_seconds"]
-        strategy_config = config.get("strategy", {})
+        strategy_config = _apply_strategy_overrides(config.get("strategy", {}), args)
         backtest_config = config.get("backtest", {})
         alerting_config = config.get("alerting", {})
         strategy_label = args.strategy_label or args.strategy
-
-        strategy_config = _with_override(
-            strategy_config, "regime_switched", "trend_strategy", args.trend_strategy
-        )
-        strategy_config = _with_override(
-            strategy_config, "regime_switched", "ranging_strategy", args.ranging_strategy
-        )
-        strategy_config = _with_override(strategy_config, "regime", "type", args.regime_type)
-        strategy_config = _with_override(
-            strategy_config, "donchian", "exit_channel_period", args.exit_channel_period
-        )
-        strategy_config = _with_override(strategy_config, "donchian", "exit_method", args.exit_method)
-        strategy_config = _with_override(
-            strategy_config, "donchian", "atr_period", args.donchian_atr_period
-        )
-        strategy_config = _with_override(
-            strategy_config, "donchian", "atr_mult", args.donchian_atr_mult
-        )
-        strategy_config = _with_override(
-            strategy_config, "funding_filtered", "base_strategy", args.funding_base_strategy
-        )
-        strategy_config = _with_override(
-            strategy_config, "funding_filtered", "high_threshold", args.funding_high_threshold
-        )
-        strategy_config = _with_override(
-            strategy_config, "funding_filtered", "low_threshold", args.funding_low_threshold
-        )
 
         funding_df = None
         funding_refresh_fn = None
@@ -692,6 +717,40 @@ def main() -> None:
             interval_seconds=interval,
             heartbeat_interval_seconds=alerting_config.get("heartbeat_interval_seconds", 86400),
         )
+
+    elif args.command == "diagnose":
+        timeframe = args.timeframe or config["poll"]["timeframe"]
+        strategy_config = _apply_strategy_overrides(config.get("strategy", {}), args)
+
+        funding_df = _load_funding_df(config, conn) if args.strategy == "funding_filtered" else None
+        strategy = _build_strategy(args.strategy, strategy_config, funding_df=funding_df)
+
+        # refresh candle data first so the diagnosis reflects the latest
+        # close, same as a live shadow poll would — not whatever happens to
+        # already be sitting in the local DB
+        backfill_candles(
+            exchange, conn, exchange_id, symbol, timeframe, config["backfill"]["start_date"], resume=True
+        )
+        df = query_candles_df(conn, exchange_id, symbol, timeframe).tail(
+            max(500, strategy.min_lookback + 5)
+        )
+        df = drop_incomplete_bar(df, timeframe)
+
+        if len(df) < strategy.min_lookback:
+            print(f"not enough complete history yet ({len(df)}/{strategy.min_lookback} bars)")
+        else:
+            signal = strategy.generate_signal(df)
+            diagnosis = strategy.diagnose(df)
+            print(f"=== {args.strategy} diagnosis for {symbol} {timeframe} as of {df.index[-1]} ===")
+            if signal is not None:
+                print(
+                    f"SIGNAL WOULD FIRE: {signal.direction} @ {signal.entry_price:.2f} "
+                    f"stop={signal.stop_loss:.2f} reason={signal.reason}"
+                )
+            else:
+                print("no signal right now")
+            for key, value in diagnosis.items():
+                print(f"  {key}: {value}")
 
 
 if __name__ == "__main__":

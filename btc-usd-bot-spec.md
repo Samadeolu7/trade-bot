@@ -127,8 +127,15 @@ On BTC/USDT 2020-2023: best-of-9 in a `swing_window`/`retest_window` sweep was P
 ## 9. Alerting Layer
 
 - Create a bot via Telegram's BotFather, grab the bot token and the target chat ID.
-- Alert types: signal fired (with entry/stop/target/reason), daily summary, and a heartbeat/error alert so the user knows if the bot process dies — a silent bot is worse than no bot.
+- Alert types: signal fired (with entry/stop/target/reason), daily summary, a heartbeat/error alert so the user knows if the bot process dies — a silent bot is worse than no bot — and (2026-09-09) a near-miss alert.
 - Keep the message format consistent and parseable (structured, not free text) in case it's parsed programmatically later.
+
+**Sanity-checking against your own reading of the market (2026-09-09)**: a signal-fired alert only tells you when a strategy *did* act — it says nothing about whether it *should have* and didn't, which is exactly the failure mode a silent bug would produce. Every `Strategy` now exposes `diagnose(df) -> dict`: a snapshot of its current read of the market (regime state, distance to entry, indicator values) plus a `near_miss` flag for "a human would plausibly expect an entry soon" — even when `generate_signal` returns nothing. Three ways to see it:
+1. `python main.py diagnose --strategy <name> [overrides...]` — prints the current diagnosis on demand, built from the exact same config/override plumbing as `shadow` so it reflects what a live run would actually do (backfills fresh data first, doesn't just read whatever's already local).
+2. The daily Telegram summary now appends `diag_*` fields from the strategy's diagnosis.
+3. A new `NEAR_MISS` alert fires the first time `near_miss` turns true, de-duplicated on a stable category key (not the human-readable reason, which can embed drifting numbers) so a persisting condition alerts once, not every 5-minute poll.
+
+Implemented for the four strategies actually deployed with a meaningful "why didn't this fire" story: `DonchianBreakoutStrategy` (proximity to either channel edge), `MultiTimeframeTrendPullbackStrategy` (HTF trend confirmed, daily pulled back, reclaim not yet closed — the canonical "pullback after trend" case), `VolatilityExpansionBreakoutStrategy` (currently squeezed, watching for a breakout), and `FundingFilteredStrategy` (base strategy would fire, but funding is vetoing it — a materially different, more actionable situation than a generic near-miss, so it takes precedence). `RegimeSwitchedStrategy.diagnose` merges in whichever sub-strategy the regime says is currently "live." Strategies not in active shadow-run use (ema_cross, rsi_bb, market_structure) fall back to the base no-op default rather than needing their own implementation.
 
 ## 10. Execution Layer (Optional, later phase) — Quidax
 

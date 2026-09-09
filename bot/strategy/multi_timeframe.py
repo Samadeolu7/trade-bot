@@ -25,7 +25,7 @@ class MultiTimeframeTrendPullbackStrategy(Strategy):
     The most recent resampled higher-timeframe bar is always dropped before
     use: pandas resampling buckets the still-in-progress period along with
     completed ones, and treating it as complete would be exactly the kind
-    of look-ahead the shadow runner's `_drop_incomplete_bar` already guards
+    of look-ahead the shadow runner's `drop_incomplete_bar` already guards
     against on the base timeframe."""
 
     name = "multi_timeframe"
@@ -122,6 +122,59 @@ class MultiTimeframeTrendPullbackStrategy(Strategy):
                 context=context,
             )
         return None
+
+    def diagnose(self, df: pd.DataFrame) -> dict:
+        if len(df) < self.min_lookback:
+            return {"ready": False}
+
+        bullish, bearish = self._htf_trend(df)
+        trend = "bullish" if bullish else "bearish" if bearish else "neutral"
+
+        ltf_ema = ema(df["close"], self.pullback_ema_period)
+        last_ema = ltf_ema.iloc[-1]
+        last_close = df["close"].iloc[-1]
+        if pd.isna(last_ema):
+            return {"ready": False, "htf_trend": trend}
+
+        recent_close = df["close"].iloc[-self.pullback_lookback - 1 : -1]
+        recent_ema = ltf_ema.iloc[-self.pullback_lookback - 1 : -1]
+        dipped_below = bool((recent_close < recent_ema).any())
+        bounced_above = bool((recent_close > recent_ema).any())
+        dist_to_ema_pct = round(float((last_close - last_ema) / last_ema * 100), 3)
+
+        # "awaiting reclaim": the higher timeframe already confirms a
+        # direction and the daily chart has pulled back to/through the EMA
+        # recently, but hasn't closed back on the trend side of it yet —
+        # exactly the "pullback after trend" setup a human would be watching
+        # for by eye.
+        near_miss, near_miss_key, near_miss_reason = False, None, None
+        if trend == "bullish" and dipped_below and last_close <= last_ema:
+            near_miss, near_miss_key = True, "bullish_pullback_awaiting_reclaim"
+            near_miss_reason = (
+                f"HTF ({self.htf_rule}) bullish, daily dipped below "
+                f"EMA{self.pullback_ema_period} recently, still "
+                f"{abs(dist_to_ema_pct):.2f}% below it — awaiting a reclaim close"
+            )
+        elif trend == "bearish" and bounced_above and last_close >= last_ema:
+            near_miss, near_miss_key = True, "bearish_pullback_awaiting_reclaim"
+            near_miss_reason = (
+                f"HTF ({self.htf_rule}) bearish, daily bounced above "
+                f"EMA{self.pullback_ema_period} recently, still "
+                f"{dist_to_ema_pct:.2f}% above it — awaiting a reclaim close"
+            )
+
+        return {
+            "ready": True,
+            "htf_trend": trend,
+            "close": round(float(last_close), 2),
+            "ema": round(float(last_ema), 2),
+            "dist_to_ema_pct": dist_to_ema_pct,
+            "recent_dip_below_ema": dipped_below,
+            "recent_bounce_above_ema": bounced_above,
+            "near_miss": near_miss,
+            "near_miss_key": near_miss_key,
+            "near_miss_reason": near_miss_reason,
+        }
 
     def trail_stop(self, df: pd.DataFrame, direction: Direction, current_stop: float) -> float:
         atr_val = atr(df["high"], df["low"], df["close"], self.atr_period)

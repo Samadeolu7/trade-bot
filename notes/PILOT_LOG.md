@@ -429,3 +429,44 @@ containers don't slowly drift back into sync. Doesn't meaningfully change
 data freshness (jitter is ~10% of a 5-minute interval). Added a test
 mocking `time.sleep` to verify both the startup and per-iteration bounds
 without actually sleeping.
+
+## Sanity-checking infrastructure: diagnose CLI, near-miss alert, richer daily summary (2026-09-09)
+
+User's ask: BTC currently looks like a pullback-after-trend setup by eye —
+how do they independently confirm the bot would (or wouldn't) act on it,
+without waiting for a signal that may never fire? Picked all three options
+offered rather than just one:
+
+- Added `Strategy.diagnose(df) -> dict` (base default: nothing to report).
+  Implemented for the four strategies with a meaningful "why didn't this
+  fire" story: `DonchianBreakoutStrategy` (% distance to either channel
+  edge), `MultiTimeframeTrendPullbackStrategy` (HTF trend confirmed, daily
+  pulled back, reclaim not yet closed — exactly the user's scenario),
+  `VolatilityExpansionBreakoutStrategy` (currently squeezed, watching for a
+  breakout), `RegimeSwitchedStrategy` (merges in whichever sub-strategy is
+  currently "live" per the regime), `FundingFilteredStrategy` (base would
+  fire but funding is vetoing it — takes precedence over the base's own
+  near-miss, since a live veto is more actionable than a generic proximity
+  reading). Two dedicated fields per diagnosis: `near_miss` (bool) and
+  `near_miss_key` (a short, STABLE category used only for de-dup — must
+  never embed a value that drifts bar-to-bar) vs. `near_miss_reason`
+  (human-readable, free to include numbers, shown but never compared).
+- `python main.py diagnose --strategy <name> [overrides]`: on-demand CLI,
+  built from the exact same config/override plumbing as `shadow` (refactored
+  the shared override flags into `_add_strategy_override_args`/
+  `_apply_strategy_overrides` so `shadow` and `diagnose` can't drift apart),
+  backfills fresh data first so it reflects the current market, not stale
+  local DB contents.
+- Enriched `DAILY_SUMMARY` with `diag_*` fields from the strategy's
+  diagnosis (skips the internal `near_miss_key` — not for a human reader).
+- New `NEAR_MISS` Telegram alert, checked every poll while flat (skipped
+  once a position is open — a *new* entry isn't relevant then). De-
+  duplicated on `near_miss_key` via `bot_state`, so a persisting condition
+  alerts once when it starts (and again if it changes, or recovers then
+  recurs), not every 5-minute cycle.
+- Renamed the shadow runner's `_drop_incomplete_bar` to `drop_incomplete_bar`
+  (now a proper shared utility — used by `shadow_poll_once`, the daily
+  summary, and the new `diagnose` command, not just internally to the
+  runner).
+- 21 new tests across the five strategies' diagnose() methods plus the
+  runner's dedup logic; 189 total passing.

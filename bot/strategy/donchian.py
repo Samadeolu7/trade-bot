@@ -120,6 +120,46 @@ class DonchianBreakoutStrategy(Strategy):
             )
         return None
 
+    # within this % of a channel edge counts as a near miss — untested
+    # guess, not a validated value
+    NEAR_MISS_PCT = 1.0
+
+    def diagnose(self, df: pd.DataFrame) -> dict:
+        if len(df) < self.min_lookback:
+            return {"ready": False}
+        entry_upper, entry_lower = self._entry_channels(df)
+        last_upper, last_lower = entry_upper.iloc[-1], entry_lower.iloc[-1]
+        close = df["close"].iloc[-1]
+        if pd.isna(last_upper) or pd.isna(last_lower):
+            return {"ready": False}
+
+        dist_to_upper_pct = round(float((last_upper - close) / close * 100), 3)
+        dist_to_lower_pct = round(float((close - last_lower) / close * 100), 3)
+
+        near_miss, near_miss_key, near_miss_reason = False, None, None
+        if 0 < dist_to_upper_pct <= self.NEAR_MISS_PCT:
+            near_miss, near_miss_key = True, "near_upper_channel"
+            near_miss_reason = (
+                f"within {dist_to_upper_pct:.2f}% of the {self.channel_period}-bar high channel"
+            )
+        elif 0 < dist_to_lower_pct <= self.NEAR_MISS_PCT:
+            near_miss, near_miss_key = True, "near_lower_channel"
+            near_miss_reason = (
+                f"within {dist_to_lower_pct:.2f}% of the {self.channel_period}-bar low channel"
+            )
+
+        return {
+            "ready": True,
+            "close": round(float(close), 2),
+            "entry_upper": round(float(last_upper), 2),
+            "entry_lower": round(float(last_lower), 2),
+            "dist_to_upper_pct": dist_to_upper_pct,
+            "dist_to_lower_pct": dist_to_lower_pct,
+            "near_miss": near_miss,
+            "near_miss_key": near_miss_key,
+            "near_miss_reason": near_miss_reason,
+        }
+
     def entry_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         entry_upper, entry_lower = self._entry_channels(df)
         long_stop, short_stop = self._exit_stop_series(df)

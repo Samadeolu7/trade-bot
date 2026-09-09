@@ -59,6 +59,29 @@ class Strategy(ABC):
         generate_signal there only ever see the fixed historical df."""
         return None
 
+    def diagnose(self, df: pd.DataFrame) -> dict:
+        """A snapshot of this strategy's current read of the market —
+        regime state, indicator values, how close conditions are to firing
+        — even when generate_signal returns nothing. Exists so "why didn't
+        it trade" is answerable without guessing: used by the `diagnose` CLI
+        command, the enriched daily Telegram summary, and near-miss alerts.
+
+        Three keys have special meaning to those callers; everything else is
+        free-form diagnostic context:
+        - `near_miss` (bool): a human would plausibly expect an entry soon.
+        - `near_miss_key` (str | None): a short, STABLE category identifying
+          *which* near-miss condition this is (e.g. "bullish_pullback_
+          awaiting_reclaim") — used to de-duplicate repeated alerts, so it
+          must not embed values that drift bar-to-bar (a distance-to-target
+          percentage, say). Required whenever near_miss is True.
+        - `near_miss_reason` (str | None): human-readable detail, free to
+          include numbers — shown in alerts but never compared for dedup.
+
+        Default: nothing to report. Strategies actually deployed in a
+        shadow run should override this; ones that aren't (yet) don't need
+        to."""
+        return {"near_miss": False, "near_miss_key": None, "near_miss_reason": None}
+
     def entry_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         """Vectorized equivalent of generate_signal: for every bar in df,
         would this strategy open a position there? Returns a frame aligned to

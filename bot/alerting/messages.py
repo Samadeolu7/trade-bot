@@ -70,6 +70,7 @@ def format_daily_summary(
     trades_today: int,
     trades_all_time: int,
     total_pnl_pct: float,
+    diagnosis: dict | None = None,
 ) -> str:
     if open_position is not None:
         position_line = (
@@ -78,18 +79,36 @@ def format_daily_summary(
         )
     else:
         position_line = "flat"
-    return _kv_lines(
-        "DAILY_SUMMARY",
-        {
-            "strategy": strategy_label,
-            "symbol": symbol,
-            "timeframe": timeframe,
-            "position": position_line,
-            "trades_today": trades_today,
-            "trades_all_time": trades_all_time,
-            "cumulative_pnl_pct": f"{total_pnl_pct:.2f}",
-        },
-    )
+    fields = {
+        "strategy": strategy_label,
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "position": position_line,
+        "trades_today": trades_today,
+        "trades_all_time": trades_all_time,
+        "cumulative_pnl_pct": f"{total_pnl_pct:.2f}",
+    }
+    # for sanity-checking the bot's read of the market against your own —
+    # near_miss_key is an internal de-dup token, not meant for a human reader
+    for key, value in (diagnosis or {}).items():
+        if key == "near_miss_key":
+            continue
+        fields[f"diag_{key}"] = value
+    return _kv_lines("DAILY_SUMMARY", fields)
+
+
+def format_near_miss_alert(symbol: str, timeframe: str, strategy_label: str, diagnosis: dict) -> str:
+    fields = {
+        "strategy": strategy_label,
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "reason": diagnosis.get("near_miss_reason"),
+    }
+    for key, value in diagnosis.items():
+        if key in ("near_miss", "near_miss_key", "near_miss_reason"):
+            continue
+        fields[key] = value
+    return _kv_lines("NEAR_MISS", fields)
 
 
 def format_heartbeat(symbol: str, timeframe: str, strategy_label: str) -> str:

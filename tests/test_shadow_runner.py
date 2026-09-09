@@ -4,9 +4,10 @@ import pandas as pd
 
 from bot.backtest.engine import open_position as engine_open_position
 from bot.shadow.runner import (
-    _drop_incomplete_bar,
+    drop_incomplete_bar,
     maybe_send_daily_summary,
     maybe_send_heartbeat,
+    maybe_send_near_miss_alert,
     run_shadow_loop,
     shadow_poll_once,
 )
@@ -250,22 +251,76 @@ def test_heartbeat_scoped_by_strategy_label(tmp_path):
 
 def test_daily_summary_retries_until_delivery_succeeds(tmp_path):
     conn = make_conn(tmp_path)
+    strategy = ScriptedStrategy(signal_to_return=None, min_lookback=100)  # never "ready" — keeps diagnose out of the way
     failing_alerter = MagicMock()
     failing_alerter.send.return_value = False
 
-    maybe_send_daily_summary(conn, failing_alerter, "binance", "BTC/USDT", "1d", STRATEGY_LABEL)
+    maybe_send_daily_summary(conn, failing_alerter, "binance", "BTC/USDT", "1d", STRATEGY_LABEL, strategy)
     assert get_state(conn, f"{STRATEGY_LABEL}:last_summary_date") is None
 
-    maybe_send_daily_summary(conn, failing_alerter, "binance", "BTC/USDT", "1d", STRATEGY_LABEL)
+    maybe_send_daily_summary(conn, failing_alerter, "binance", "BTC/USDT", "1d", STRATEGY_LABEL, strategy)
     assert failing_alerter.send.call_count == 2  # retried, not skipped for the rest of the day
 
     succeeding_alerter = MagicMock()
     succeeding_alerter.send.return_value = True
-    maybe_send_daily_summary(conn, succeeding_alerter, "binance", "BTC/USDT", "1d", STRATEGY_LABEL)
+    maybe_send_daily_summary(conn, succeeding_alerter, "binance", "BTC/USDT", "1d", STRATEGY_LABEL, strategy)
     assert get_state(conn, f"{STRATEGY_LABEL}:last_summary_date") is not None
 
-    maybe_send_daily_summary(conn, succeeding_alerter, "binance", "BTC/USDT", "1d", STRATEGY_LABEL)
+    maybe_send_daily_summary(conn, succeeding_alerter, "binance", "BTC/USDT", "1d", STRATEGY_LABEL, strategy)
     assert succeeding_alerter.send.call_count == 1
+
+
+def test_daily_summary_includes_diagnosis_when_strategy_is_ready(tmp_path):
+    conn = make_conn(tmp_path)
+    seed_complete_history(conn, n_days=10)
+    strategy = ScriptedStrategy(signal_to_return=None, min_lookback=1)
+    alerter = MagicMock()
+    alerter.send.return_value = True
+
+    maybe_send_daily_summary(conn, alerter, "binance", "BTC/USDT", "1d", STRATEGY_LABEL, strategy)
+
+    msg = alerter.send.call_args[0][0]
+    assert "diag_near_miss=False" in msg
+    assert "diag_near_miss_key" not in msg  # internal dedup token, not for humans
+
+
+def test_near_miss_alert_fires_once_then_suppresses_until_state_changes(tmp_path):
+    conn = make_conn(tmp_path)
+    close = pd.Series([100.0] * 5, index=pd.date_range("2020-01-01", periods=5, freq="D", tz="UTC"))
+    df = pd.DataFrame(
+        {"open": close, "high": close + 0.5, "low": close - 0.5, "close": close, "volume": 1.0}
+    )
+
+    class NearMissStrategy(Strategy):
+        name = "near_miss_test"
+
+        def __init__(self):
+            super().__init__({})
+            self.min_lookback = 1
+            self.key = "condition_a"
+
+        def generate_signal(self, df):
+            return None
+
+        def diagnose(self, df):
+            return {"near_miss": True, "near_miss_key": self.key, "near_miss_reason": f"reason for {self.key}"}
+
+    strategy = NearMissStrategy()
+    alerter = MagicMock()
+    alerter.send.return_value = True
+
+    maybe_send_near_miss_alert(conn, alerter, "BTC/USDT", "1d", STRATEGY_LABEL, strategy, df)
+    assert alerter.send.call_count == 1
+    assert "NEAR_MISS" in alerter.send.call_args[0][0]
+
+    # same condition again — suppressed, not re-alerted every poll
+    maybe_send_near_miss_alert(conn, alerter, "BTC/USDT", "1d", STRATEGY_LABEL, strategy, df)
+    assert alerter.send.call_count == 1
+
+    # a materially different condition re-triggers it
+    strategy.key = "condition_b"
+    maybe_send_near_miss_alert(conn, alerter, "BTC/USDT", "1d", STRATEGY_LABEL, strategy, df)
+    assert alerter.send.call_count == 2
 
 
 def test_drop_incomplete_bar_keeps_bars_whose_period_has_ended():
@@ -278,7 +333,7 @@ def test_drop_incomplete_bar_keeps_bars_whose_period_has_ended():
             pd.Timestamp.now(tz="UTC").normalize() - pd.Timedelta(days=1),
         ],
     )
-    result = _drop_incomplete_bar(df, "1d")
+    result = drop_incomplete_bar(df, "1d")
     assert len(result) == 3  # all three days have fully ended
 
 
@@ -291,7 +346,7 @@ def test_drop_incomplete_bar_drops_bar_still_in_progress():
             pd.Timestamp.now(tz="UTC").normalize(),  # today — still forming
         ],
     )
-    result = _drop_incomplete_bar(df, "1d")
+    result = drop_incomplete_bar(df, "1d")
     assert len(result) == 1
     assert result.index[-1] == df.index[0]
 

@@ -11,6 +11,7 @@ from bot.alerting.messages import (
     format_error_alert,
     format_exit_message,
     format_heartbeat,
+    format_near_miss_alert,
     format_signal_message,
 )
 from bot.alerting.telegram import TelegramAlerter
@@ -35,7 +36,7 @@ from bot.strategy.base import Strategy
 logger = logging.getLogger(__name__)
 
 
-def _drop_incomplete_bar(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
+def drop_incomplete_bar(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
     """The exchange's most recent candle is still forming until its period
     ends — evaluating signals/exits against it would diverge from the
     backtest (which only ever sees finished bars) and could fire on data
@@ -86,7 +87,7 @@ def shadow_poll_once(
     df = query_candles_df(conn, exchange_id, symbol, timeframe).tail(
         max(history_bars, strategy.min_lookback + 5)
     )
-    df = _drop_incomplete_bar(df, timeframe)
+    df = drop_incomplete_bar(df, timeframe)
 
     if len(df) < strategy.min_lookback:
         logger.info(
@@ -138,6 +139,10 @@ def shadow_poll_once(
                 strategy_label, signal.direction, signal.entry_price, signal.stop_loss, signal.reason,
             )
             alerter.send(format_signal_message(signal, symbol, timeframe, strategy_label))
+        else:
+            # only worth surfacing "is an entry brewing" while flat — once a
+            # position is open, whether a *new* entry would fire isn't relevant
+            maybe_send_near_miss_alert(conn, alerter, symbol, timeframe, strategy_label, strategy, df)
 
 
 def maybe_send_heartbeat(
@@ -160,7 +165,7 @@ def maybe_send_heartbeat(
 
 def maybe_send_daily_summary(
     conn: sqlite3.Connection, alerter: TelegramAlerter, exchange_id: str, symbol: str, timeframe: str,
-    strategy_label: str,
+    strategy_label: str, strategy: Strategy,
 ) -> None:
     today = pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d")
     state_key = f"{strategy_label}:last_summary_date"
@@ -171,13 +176,45 @@ def maybe_send_daily_summary(
     trades_today = count_paper_trades_since(conn, exchange_id, symbol, timeframe, strategy_label, since_ms)
     trades_all_time = count_paper_trades_all_time(conn, exchange_id, symbol, timeframe, strategy_label)
     total_pnl_pct = sum_paper_trade_pnl_pct(conn, exchange_id, symbol, timeframe, strategy_label)
+    # self-contained, like the trade-count queries above, rather than
+    # requiring the caller to have a fresh df on hand; best-effort — an
+    # under-warmed-up strategy just reports no diagnosis rather than
+    # blocking the whole summary
+    df = drop_incomplete_bar(
+        query_candles_df(conn, exchange_id, symbol, timeframe).tail(max(500, strategy.min_lookback + 5)),
+        timeframe,
+    )
+    diagnosis = strategy.diagnose(df) if len(df) >= strategy.min_lookback else {}
     sent = alerter.send(
         format_daily_summary(
-            symbol, timeframe, strategy_label, open_position, trades_today, trades_all_time, total_pnl_pct
+            symbol, timeframe, strategy_label, open_position, trades_today, trades_all_time,
+            total_pnl_pct, diagnosis,
         )
     )
     if sent:
         set_state(conn, state_key, today)
+
+
+def maybe_send_near_miss_alert(
+    conn: sqlite3.Connection, alerter: TelegramAlerter, symbol: str, timeframe: str,
+    strategy_label: str, strategy: Strategy, df: pd.DataFrame,
+) -> None:
+    """Fires when a strategy's own diagnose() reports a near-miss — "a human
+    would plausibly expect an entry soon, here's why it hasn't fired." De-
+    duplicated on `near_miss_key` (a stable category, not the human-readable
+    reason, which can embed drifting numbers) so a persisting condition
+    alerts once, not every 5-minute poll; a genuinely new condition (or a
+    recovery back to no near-miss) re-triggers it."""
+    diagnosis = strategy.diagnose(df)
+    key = diagnosis.get("near_miss_key") if diagnosis.get("near_miss") else None
+    state_key = f"{strategy_label}:last_near_miss_key"
+    if key == get_state(conn, state_key):
+        return
+    if key is None:
+        set_state(conn, state_key, "")
+        return
+    if alerter.send(format_near_miss_alert(symbol, timeframe, strategy_label, diagnosis)):
+        set_state(conn, state_key, key)
 
 
 def run_shadow_loop(
@@ -214,7 +251,7 @@ def run_shadow_loop(
                 exchange, conn, alerter, exchange_id, symbol, timeframe, strategy, strategy_label,
                 fee, slippage, backfill_start_date,
             )
-            maybe_send_daily_summary(conn, alerter, exchange_id, symbol, timeframe, strategy_label)
+            maybe_send_daily_summary(conn, alerter, exchange_id, symbol, timeframe, strategy_label, strategy)
             maybe_send_heartbeat(conn, alerter, symbol, timeframe, strategy_label, heartbeat_interval_seconds)
         except Exception as exc:
             logger.exception("shadow run iteration failed")

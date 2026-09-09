@@ -136,6 +136,41 @@ class VolatilityExpansionBreakoutStrategy(Strategy):
             index=df.index,
         )
 
+    def diagnose(self, df: pd.DataFrame) -> dict:
+        if len(df) < self.min_lookback:
+            return {"ready": False}
+
+        bands = bollinger_bands(df["close"], self.bb_period, self.bb_std)
+        width_pct = (bands["bb_upper"] - bands["bb_lower"]) / df["close"]
+        threshold = width_pct.rolling(self.squeeze_lookback).quantile(self.squeeze_percentile)
+        last_width, last_threshold = width_pct.iloc[-1], threshold.iloc[-1]
+        if pd.isna(last_threshold):
+            return {"ready": False}
+
+        is_squeezed = bool(last_width <= last_threshold)
+        close = df["close"].iloc[-1]
+
+        # a squeeze itself is the near-miss: the market is coiled and this
+        # strategy is, by design, watching for whichever direction it breaks
+        near_miss, near_miss_key, near_miss_reason = False, None, None
+        if is_squeezed:
+            near_miss, near_miss_key = True, "squeezed_watching_for_breakout"
+            near_miss_reason = (
+                f"BB width at {last_width:.4f} (bottom {self.squeeze_percentile:.0%} of "
+                f"{self.squeeze_lookback}-bar history) — coiled, watching for a breakout"
+            )
+
+        return {
+            "ready": True,
+            "close": round(float(close), 2),
+            "bb_width_pct": round(float(last_width), 5),
+            "squeeze_threshold_pct": round(float(last_threshold), 5),
+            "is_squeezed": is_squeezed,
+            "near_miss": near_miss,
+            "near_miss_key": near_miss_key,
+            "near_miss_reason": near_miss_reason,
+        }
+
     def trail_stop(self, df: pd.DataFrame, direction: Direction, current_stop: float) -> float:
         atr_val = atr(df["high"], df["low"], df["close"], self.atr_period).iloc[-1]
         if pd.isna(atr_val):

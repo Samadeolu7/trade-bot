@@ -147,6 +147,48 @@ def test_atr_exit_trail_stop_only_ratchets_favorably():
     assert ratcheted_short < 500.0
 
 
+def test_diagnose_not_ready_below_min_lookback():
+    strategy = build_strategy(20)
+    df = make_df([100.0] * 10)
+    assert strategy.diagnose(df) == {"ready": False}
+
+
+def test_diagnose_near_miss_when_close_to_upper_channel():
+    strategy = build_strategy(20)
+    # channel: high=100.5 (entry_upper), close within 1% of it without breaking
+    df = make_df([100.0] * 20 + [100.3])
+
+    diagnosis = strategy.diagnose(df)
+
+    assert strategy.generate_signal(df) is None  # confirms it's a near miss, not an actual signal
+    assert diagnosis["ready"] is True
+    assert diagnosis["near_miss"] is True
+    assert diagnosis["near_miss_key"] == "near_upper_channel"
+    assert diagnosis["dist_to_upper_pct"] < DonchianBreakoutStrategy.NEAR_MISS_PCT
+
+
+def test_diagnose_no_near_miss_when_far_from_either_channel():
+    strategy = build_strategy(20)
+    # a wide historical range (channel spans roughly 90-110) with the last
+    # close sitting comfortably mid-channel, well outside the 1% near-miss band
+    df = make_df([90.0, 110.0] + [100.0] * 18 + [100.0])
+
+    diagnosis = strategy.diagnose(df)
+
+    assert diagnosis["near_miss"] is False
+    assert diagnosis["near_miss_key"] is None
+
+
+def test_diagnose_no_near_miss_when_signal_actually_fires():
+    strategy = build_strategy(20)
+    df = make_df([100.0] * 20 + [110.0])  # a clean breakout, not a near miss
+
+    diagnosis = strategy.diagnose(df)
+
+    assert strategy.generate_signal(df) is not None
+    assert diagnosis["near_miss"] is False
+
+
 def test_trail_stop_ratchets_toward_opposite_channel_only_favorably():
     strategy = build_strategy(20)
     # channel rises after entry: bars 1-19 flat at 100, bar 20 breaks out to 110,

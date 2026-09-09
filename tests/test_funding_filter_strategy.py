@@ -160,3 +160,51 @@ def test_before_poll_refreshes_funding_df_via_refresh_fn():
 def test_before_poll_is_noop_without_refresh_fn():
     strat = FundingFilteredStrategy(AlwaysLongStrategy(), make_funding_df([]), 0.0005, -0.0005)
     strat.before_poll()  # should not raise
+
+
+def test_diagnose_reports_veto_when_long_signal_would_fire_but_funding_crowded():
+    df = make_df(3)
+    funding_df = make_funding_df([(df.index[-1], 0.001)])  # above high_threshold
+    strat = FundingFilteredStrategy(AlwaysLongStrategy(), funding_df, 0.0005, -0.0005)
+
+    diagnosis = strat.diagnose(df)
+
+    assert strat.generate_signal(df) is None  # confirms it's actually vetoed
+    assert diagnosis["funding_rate"] == 0.001
+    assert diagnosis["near_miss"] is True
+    assert diagnosis["near_miss_key"] == "long_signal_vetoed_by_funding"
+    assert "would enter long" in diagnosis["near_miss_reason"]
+
+
+def test_diagnose_reports_veto_when_short_signal_would_fire_but_funding_crowded():
+    df = make_df(3)
+    funding_df = make_funding_df([(df.index[-1], -0.001)])  # below low_threshold
+    strat = FundingFilteredStrategy(AlwaysShortStrategy(), funding_df, 0.0005, -0.0005)
+
+    diagnosis = strat.diagnose(df)
+
+    assert strat.generate_signal(df) is None
+    assert diagnosis["near_miss"] is True
+    assert diagnosis["near_miss_key"] == "short_signal_vetoed_by_funding"
+
+
+def test_diagnose_no_veto_reported_when_funding_within_bounds():
+    df = make_df(3)
+    funding_df = make_funding_df([(df.index[-1], 0.0001)])
+    strat = FundingFilteredStrategy(AlwaysLongStrategy(), funding_df, 0.0005, -0.0005)
+
+    diagnosis = strat.diagnose(df)
+
+    assert strat.generate_signal(df) is not None
+    assert diagnosis["funding_rate"] == 0.0001
+    assert diagnosis["near_miss"] is False
+
+
+def test_diagnose_passes_through_base_diagnosis_when_no_funding_data():
+    df = make_df(3)
+    strat = FundingFilteredStrategy(AlwaysLongStrategy(), make_funding_df([]), 0.0005, -0.0005)
+
+    diagnosis = strat.diagnose(df)
+
+    assert diagnosis["funding_rate"] is None
+    assert diagnosis["near_miss"] is False  # AlwaysLongStrategy's own (default) diagnose

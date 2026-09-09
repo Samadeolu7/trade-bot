@@ -101,3 +101,32 @@ def test_trail_stop_only_ratchets_favorably():
 
     stop_already_tight = 139.0
     assert strategy.trail_stop(df, "long", stop_already_tight) == stop_already_tight
+
+
+def test_diagnose_reports_near_miss_while_still_coiled():
+    strategy = build_strategy()
+    df = make_df(LONG_CLOSES[:-1])  # up to (not including) the breakout bar
+
+    diagnosis = strategy.diagnose(df)
+
+    assert diagnosis["ready"] is True
+    assert diagnosis["is_squeezed"] is True
+    assert diagnosis["near_miss"] is True
+    assert diagnosis["near_miss_key"] == "squeezed_watching_for_breakout"
+
+
+def test_diagnose_no_near_miss_once_breakout_fires():
+    strategy = build_strategy()
+    df = make_df(LONG_CLOSES)  # includes the breakout bar itself
+
+    diagnosis = strategy.diagnose(df)
+
+    assert strategy.generate_signal(df) is not None
+    assert diagnosis["near_miss"] is False
+    assert diagnosis["near_miss_key"] is None
+
+
+def test_diagnose_not_ready_when_insufficient_data():
+    strategy = build_strategy()
+    df = make_df(LONG_CLOSES[:16])
+    assert strategy.diagnose(df) == {"ready": False}

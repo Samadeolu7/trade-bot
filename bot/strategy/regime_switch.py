@@ -53,6 +53,20 @@ class RegimeSwitchedStrategy(Strategy):
             return current_stop
         return self._active.trail_stop(df, direction, current_stop)
 
+    def diagnose(self, df: pd.DataFrame) -> dict:
+        """Merges in whichever sub-strategy's diagnose is currently "live"
+        per the regime — that's the only one whose near-miss state is
+        actually actionable (the other sub isn't even being consulted right
+        now)."""
+        regime = self.regime_filter.regime(df)
+        result = {"regime": regime, "regime_filter": type(self.regime_filter).__name__}
+        if regime is None:
+            return result
+        sub = self.trending if regime == "trending" else self.ranging
+        result["sub_strategy"] = sub.name
+        result.update(sub.diagnose(df))
+        return result
+
     def entry_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         """Vectorized: regime, and both sub-strategies' entry signals, are
         each computed once over the full df, then combined per bar. Adds a

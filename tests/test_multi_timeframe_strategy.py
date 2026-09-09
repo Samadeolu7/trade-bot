@@ -99,3 +99,47 @@ def test_trail_stop_only_ratchets_favorably():
 
     stop_already_tight = 125.9
     assert strategy.trail_stop(df, "long", stop_already_tight) == stop_already_tight
+
+
+def test_diagnose_reports_near_miss_during_pullback_before_reclaim():
+    strategy = build_strategy()
+    # everything up to (not including) the reclaim bar: HTF is bullish, the
+    # daily chart has dipped below the EMA, but hasn't closed back above it
+    df = make_df(LONG_CLOSES[:-1])
+
+    diagnosis = strategy.diagnose(df)
+
+    assert diagnosis["ready"] is True
+    assert diagnosis["htf_trend"] == "bullish"
+    assert diagnosis["recent_dip_below_ema"] is True
+    assert diagnosis["near_miss"] is True
+    assert diagnosis["near_miss_key"] == "bullish_pullback_awaiting_reclaim"
+    assert "awaiting a reclaim" in diagnosis["near_miss_reason"]
+
+
+def test_diagnose_no_near_miss_once_reclaim_bar_included():
+    strategy = build_strategy()
+    df = make_df(LONG_CLOSES)  # includes the reclaim bar -> generate_signal fires instead
+
+    diagnosis = strategy.diagnose(df)
+
+    assert strategy.generate_signal(df) is not None
+    assert diagnosis["near_miss"] is False
+    assert diagnosis["near_miss_key"] is None
+
+
+def test_diagnose_mirrors_bearish_pullback_near_miss():
+    strategy = build_strategy()
+    df = make_df(SHORT_CLOSES[:-1])
+
+    diagnosis = strategy.diagnose(df)
+
+    assert diagnosis["htf_trend"] == "bearish"
+    assert diagnosis["near_miss"] is True
+    assert diagnosis["near_miss_key"] == "bearish_pullback_awaiting_reclaim"
+
+
+def test_diagnose_not_ready_when_insufficient_data():
+    strategy = build_strategy()
+    df = make_df(LONG_CLOSES[:40])
+    assert strategy.diagnose(df) == {"ready": False}
