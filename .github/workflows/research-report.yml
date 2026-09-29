@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       strategy:
-        description: "Strategy to test (e.g. crt, donchian, vol_expansion)"
+        description: "Strategy to test, or a comma-separated list run one after another (e.g. crt or vol_expansion,ema_cross)"
         default: "crt"
         required: true
       symbol:
@@ -47,7 +47,9 @@ jobs:
           PARAMS: ${{ inputs.params }}
           BASELINE: ${{ inputs.baseline }}
         run: |
-          [[ "$STRATEGY" =~ ^[a-z_]+$ ]] || { echo "bad strategy"; exit 1; }
+          [[ "$STRATEGY" =~ ^[a-z_]+(,[a-z_]+)*$ ]] || { echo "bad strategy"; exit 1; }
+          # --param sections are per-strategy, so they can't be shared across a list
+          if [[ "$STRATEGY" == *,* && -n "$PARAMS" ]]; then echo "params only work with a single strategy"; exit 1; fi
           [[ "$SYMBOL" =~ ^[A-Z0-9]+/[A-Z0-9]+$ ]] || { echo "bad symbol"; exit 1; }
           [[ "$TIMEFRAME" =~ ^[0-9]+[mhdw]$ ]] || { echo "bad timeframe"; exit 1; }
           [[ "$BASELINE" =~ ^[a-z_]+$ ]] || { echo "bad baseline"; exit 1; }
@@ -66,7 +68,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           envs: STRATEGY,SYMBOL,TIMEFRAME,PARAMS,BASELINE
-          command_timeout: 20m
+          command_timeout: 60m
           script: |
             set -e
             cd ${{ env.DEPLOY_PATH }}
@@ -75,5 +77,13 @@ jobs:
             # gets its whole train window
             docker compose run --rm trade-bot python main.py backfill \
               --symbol "$SYMBOL" --timeframe "$TIMEFRAME" --start 2020-01-01T00:00:00Z --no-resume
-            docker compose run --rm trade-bot python main.py research-report \
-              --strategy "$STRATEGY" --symbol "$SYMBOL" --timeframe "$TIMEFRAME" --baseline "$BASELINE" $PARAMS
+            # sequential on purpose: one SQLite writer at a time alongside the
+            # live shadow runs. One strategy failing doesn't stop the rest.
+            failed=""
+            for s in $(echo "$STRATEGY" | tr "," " "); do
+              echo "==> research-report $s"
+              docker compose run --rm trade-bot python main.py research-report \
+                --strategy "$s" --symbol "$SYMBOL" --timeframe "$TIMEFRAME" --baseline "$BASELINE" $PARAMS \
+                || failed="$failed $s"
+            done
+            if [ -n "$failed" ]; then echo "FAILED:$failed"; exit 1; fi
