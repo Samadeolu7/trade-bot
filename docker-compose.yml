@@ -59,6 +59,23 @@ services:
       - trade_bot_logs:/app/logs
     command: ["python", "main.py", "shadow", "--strategy", "donchian", "--strategy-label", "donchian_4h", "--timeframe", "4h"]
 
+  # Concurrent candidate #7: the control's exact setup (donchian trend,
+  # flat ranging, ADX regime filter) on 4h instead of 1d, alongside
+  # donchian-4h — does the ADX gate avoid bad 4h trades live? Backtest:
+  # train PF 1.89 / 76 trades, test PF 1.39 / 37 (vs plain donchian's 1.48).
+  # Paper only — not in the recommend feed, since its signals are a subset
+  # of donchian_4h's and would duplicate them.
+  trade-bot-donchian-adx-4h:
+    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
+    container_name: btc_trade_bot_donchian_adx_4h
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - trade_bot_data:/app/data
+      - trade_bot_logs:/app/logs
+    command: ["python", "main.py", "shadow", "--strategy", "regime_switched", "--strategy-label", "donchian_adx_4h", "--timeframe", "4h"]
+
   # Advisory recommendation feed for manual trading (MT5/Exness BTCUSD) — a
   # separate product from the shadow-run paper simulations above, never
   # places an order anywhere. One process covers every strategy listed in
