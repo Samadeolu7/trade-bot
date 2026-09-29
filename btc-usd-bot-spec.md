@@ -159,6 +159,19 @@ Best risk-adjusted result this project has produced, and positive in both window
 - Drawdowns are at a much higher exposure than donchian's 1%-risk sizing: -15% to -20% of the whole account.
 - "Trades" here are exposure episodes, many of them brief short-lookback flickers, so the ~16% "win rate" isn't comparable to the other strategies'.
 
+ETH/USDT cross-check (same untuned parameters):
+
+| | Train return / DD / Sharpe | Test return / DD / Sharpe |
+|---|---|---|
+| ensemble 1d | +112.18% / -14.71% / 1.32 | +12.96% / -14.49% / 0.50 |
+| donchian 1d | +14.46% / -18.59% / 0.45 | +3.56% / -2.62% / 0.77 |
+| ensemble 4h | +105.25% / -14.75% / 1.36 | +18.89% / -12.19% / 0.71 |
+| donchian 4h | +25.54% / -8.66% / 0.87 | +11.24% / -6.65% / 0.80 |
+
+ETH buy&hold over the test window was -16.48% (1d) / -13.60% (4h).
+
+Verdict across BTC and ETH, 1d and 4h: the ensemble made money in all 8 windows with no tuning, including while ETH fell over the test period. That's the most consistent result here. But its *risk-adjusted* edge over plain donchian doesn't hold out of sample. Test Sharpe beats donchian on BTC 1d (0.63 vs 0.00) and BTC 4h (0.76 vs 0.61), but trails it on ETH 1d (0.50 vs 0.77, donchian on only 7 trades) and ETH 4h (0.71 vs 0.80). And the ensemble's Sharpe roughly halves from train to test in all four cases, a consistent pattern that may mean decay or just a choppier 2024–26. Read it as a robust, differently-shaped trend strategy: much more capital deployed, higher absolute returns, ~12–20% account drawdowns. It's not a strictly better donchian. Worth a live paper run next to `donchian_4h`, which first needs fraction-of-capital support in shadow/recommend.
+
 **Explicitly not included: naive grid trading.** It's the most heavily marketed "profitable" crypto bot strategy, but the claims behind it are almost entirely exchange marketing rather than reproducible backtests, and its mechanics are structurally built for sideways markets — a strong sustained trend drives price outside the grid and leaves it holding unrealized losing positions, the same failure mode that made the Bollinger mean-reversion strategy above the worst performer in the real test (65.7% win rate, only +10.4% return, 52.7% drawdown). If it's added later, it needs a hard "pause during confirmed trend" kill-switch tied to the same regime filter as everything else, not a standalone always-on strategy.
 
 **Evidence note for Claude Code:** strategies (a) and (e) above were validated against an independent, reproducible backtest (CoinQuant, BTCUSDT daily candles, Jan 2021–Aug 2026, Binance 0.1% taker fees included, spans the 2021 bull run, 2022 crash, and 2023–26 cycle). None of the five strategy families tested there beat plain buy-and-hold Bitcoin on raw return over that window — their edge was a much smaller drawdown and far less time exposed to the market, not higher absolute profit. Treat that as the realistic bar: the goal of this bot is a better risk profile than holding, not a guarantee of beating it.
