@@ -7,11 +7,64 @@ on:
 
 env:
   IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/btc-trade-bot
+  PLATFORM_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/trade-desk-platform
+  FRONTEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/trade-desk-frontend
   DEPLOY_PATH: /opt/btc-trade-bot
 
 jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt -r backend/requirements.txt
+
+      - name: Strategy library tests
+        run: python -m pytest tests -q
+
+      - name: Platform tests
+        working-directory: backend
+        run: python -m pytest -q
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      # the frontend's API types are generated from the backend; a change to
+      # one without regenerating the other fails here, not in production
+      - name: API types are up to date
+        working-directory: frontend
+        env:
+          DJANGO_DEBUG: "1"
+        run: |
+          (cd ../backend && python manage.py export_openapi) > openapi.json
+          npx openapi-typescript openapi.json -o src/api/schema.d.ts
+          git diff --exit-code -- openapi.json src/api/schema.d.ts
+
+      - name: Frontend tests
+        working-directory: frontend
+        run: npm test
+
+      - name: Type-check and build frontend
+        working-directory: frontend
+        run: npm run build
+
   build:
-    name: Build & Push Image
+    name: Build & Push Images
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -26,7 +79,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build and push bot image
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -35,6 +88,29 @@ jobs:
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ github.sha }}
           cache-from: type=registry,ref=${{ env.IMAGE }}:latest
+          cache-to: type=inline
+
+      - name: Build and push platform image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.platform
+          push: true
+          tags: |
+            ${{ env.PLATFORM_IMAGE }}:latest
+            ${{ env.PLATFORM_IMAGE }}:${{ github.sha }}
+          cache-from: type=registry,ref=${{ env.PLATFORM_IMAGE }}:latest
+          cache-to: type=inline
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: frontend
+          push: true
+          tags: |
+            ${{ env.FRONTEND_IMAGE }}:latest
+            ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+          cache-from: type=registry,ref=${{ env.FRONTEND_IMAGE }}:latest
           cache-to: type=inline
 
   deploy:
@@ -62,26 +138,30 @@ jobs:
           source: "docker-compose.yml"
           target: "${{ env.DEPLOY_PATH }}/"
 
-      - name: Pull image and restart
+      - name: Pull images and restart
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          command_timeout: 5m
+          command_timeout: 10m
           script: |
             set -e
             cd ${{ env.DEPLOY_PATH }}
 
-            if [ ! -f .env ]; then
-              echo "No .env found — creating an empty one (Phase 1 needs no secrets)."
-              touch .env
-            fi
+            # the platform can't start without these; fail loudly rather
+            # than deploy a half-configured stack
+            for key in DJANGO_SECRET_KEY POSTGRES_PASSWORD; do
+              if ! grep -q "^${key}=." .env 2>/dev/null; then
+                echo "ERROR: ${key} is missing from ${{ env.DEPLOY_PATH }}/.env"
+                exit 1
+              fi
+            done
 
-            echo "==> Pulling latest image..."
+            echo "==> Pulling latest images..."
             docker compose pull
 
-            echo "==> Restarting trade-bot..."
+            echo "==> Restarting (migrations run first)..."
             docker compose up -d --remove-orphans
 
             echo "==> Cleaning up old images..."

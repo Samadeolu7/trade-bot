@@ -2,6 +2,86 @@
 
 Build spec: [btc-usd-bot-spec.md](btc-usd-bot-spec.md). This repo is being built phase-by-phase per Section 13.
 
+## Web platform (trade desk)
+
+A trading app at `leads.yincools.com.ng`: paper and (later) live accounts, a trade ticket, bots you can
+watch on a chart with every decision explained, research reports, alerts to Telegram, and users with
+owner, trader and viewer access. Build plan: spec Section 12.5.
+
+- `bot/`: the strategy library below, plus `bot/broker/` (the order interface every trade goes through,
+  the paper broker, venue profiles) and `bot/strategy/registry.py` (the one place a strategy name becomes
+  an object; the CLI and the app both use it).
+- `backend/`: Django + Django Ninja. Apps: `core` (users, 2FA, audit log), `trading` (accounts, books,
+  orders, bots, the engine), `market` (candles), `research` (experiments, lifecycle, research jobs),
+  `alerts` (alert rules and the alert log).
+- `frontend/`: React + Vite + TypeScript. Its API client is generated from the backend's schema.
+
+**Paper behaves like the venue.** A paper account copies a venue profile (`bot/broker/venues.py`). Quidax
+spot fills market orders against Quidax's real order book at its 0.1% fee and refuses shorts. The Exness
+CFD profile allows shorts, with a spread and overnight swap. Going live swaps the broker behind the
+account (`backend/trading/services/brokers.py`), and nothing above it changes.
+
+**Stops are held by the engine**, because Quidax has no stop orders. The engine (`manage.py run_engine`)
+runs separately from the website and checks stops, take-profits and resting paper limits every few
+seconds. If it stops, the worker sends an "Engine is down" alert and the app shows a red banner.
+
+**Books.** Each account has a manual book (people) and one book per bot (its allocated capital). A bot
+only spends its own allocation and only sells what it bought. The books always add up to the venue's
+balances (tested in `backend/tests/test_orders.py`).
+
+**Alerts** are rules each person chooses on the Alerts page, TradingView-style: price crosses, sudden
+moves, bot trades, stops hit, bot or engine problems, finished research reports and a daily summary. They
+go to that person's Telegram chat and the in-app alert log.
+
+### Adding a strategy
+
+1. Write the class in `bot/strategy/`.
+2. Add it to `build_strategy` and `STRATEGY_CATALOG` in `bot/strategy/registry.py`, with the config
+   sections it reads. Put its defaults in `config/config.yaml`.
+3. It now appears in the app's "New bot" form and research page. Run a research report from the app.
+
+### Running locally
+
+```
+pip install -r requirements.txt -r backend/requirements.txt
+cd backend
+$env:DJANGO_DEBUG=1                      # bash: export DJANGO_DEBUG=1
+python manage.py migrate
+python manage.py createcachetable
+python manage.py createsuperuser         # then set role=owner in /admin
+python manage.py import_sqlite ../data/trades.db   # optional: the CLI's history
+python manage.py runserver               # API, admin and websockets on :8000
+python manage.py run_engine              # bots and stops (second terminal)
+python manage.py run_worker              # research jobs and engine watchdog (third terminal)
+cd ../frontend; npm install; npm run dev # the app on :5173
+```
+
+Without `DATABASE_URL` and `REDIS_URL` it uses SQLite and in-process layers, so live pushes from the
+engine don't reach the page locally; pages still refresh every few seconds. Binance may be unreachable
+from some networks; the engine then has no new candles, but Quidax prices and paper trading still work.
+
+After changing the API, `cd frontend; npm run api` regenerates the typed client. CI fails if it's stale.
+
+Tests: `python -m pytest tests` (library), `cd backend; python -m pytest` (platform), `cd frontend;
+npm test`.
+
+### Deploying and the Koya cutover
+
+The `platform-*` services in `docker-compose.yml` deploy with everything else on push to `master`. The
+server's `.env` needs `DJANGO_SECRET_KEY` and `POSTGRES_PASSWORD` (see `.env.example`), or the deploy
+stops before touching anything.
+
+The Koya lead scorer currently owns `leads.yincools.com.ng` in Traefik, so it has to go first:
+
+1. On the server: `cd /opt/koya-leads && docker compose down`, so its router releases the host.
+2. Push to `master` (or run the deploy workflow). Traefik issues the certificate for the new routers.
+3. `docker compose exec platform-web python manage.py createsuperuser`, set its role to owner in
+   `/admin`, sign in and set up the authenticator app.
+4. Copy the shadow runs' SQLite database into the web container (`docker compose cp`) and run
+   `python manage.py import_sqlite <path>`, so experiments, lifecycle stages and shadow history carry over.
+5. Recreate the deployed shadow configurations as paper bots, run both side by side for about a week,
+   then remove the shadow and recommend services from `docker-compose.yml`.
+
 ## Phase 1 — Data Layer
 
 Binance read-only OHLCV data via `ccxt`, stored in SQLite. No exchange account credentials needed.

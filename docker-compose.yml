@@ -122,6 +122,148 @@ services:
       - trade_bot_logs:/app/logs
     command: ["python", "main.py", "recommend", "--timeframe", "4h"]
 
+  # ---------------------------------------------------------------------------
+  # Web platform (backend/, frontend/): accounts, paper trading, bots, research
+  # and alerts in one app at leads.yincools.com.ng. Runs side by side with the
+  # shadow/recommend containers above until the new paper bots have matched
+  # them for a week; those are then removed. Needs in .env:
+  # DJANGO_SECRET_KEY, POSTGRES_PASSWORD, TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID.
+  # ---------------------------------------------------------------------------
+
+  platform-db:
+    image: postgres:16-alpine
+    container_name: trade_desk_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: trade
+      POSTGRES_USER: trade
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - platform_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trade -d trade"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  platform-redis:
+    image: redis:7-alpine
+    container_name: trade_desk_redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # applies database migrations once per deploy; everything else waits for it
+  platform-migrate:
+    image: ${PLATFORM_IMAGE:-samadeolu7/trade-desk-platform:latest}
+    env_file: [.env]
+    environment: &platform_env
+      DATABASE_URL: postgres://trade:${POSTGRES_PASSWORD}@platform-db:5432/trade
+      REDIS_URL: redis://platform-redis:6379/0
+      DJANGO_ALLOWED_HOSTS: leads.yincools.com.ng,localhost,platform-web
+      DJANGO_CSRF_TRUSTED_ORIGINS: https://leads.yincools.com.ng
+    command: ["python", "manage.py", "migrate", "--noinput"]
+    healthcheck:
+      disable: true
+    depends_on:
+      platform-db: {condition: service_healthy}
+    restart: "no"
+
+  platform-web:
+    image: ${PLATFORM_IMAGE:-samadeolu7/trade-desk-platform:latest}
+    container_name: trade_desk_web
+    restart: unless-stopped
+    env_file: [.env]
+    environment: *platform_env
+    depends_on:
+      platform-migrate: {condition: service_completed_successfully}
+      platform-redis: {condition: service_healthy}
+    networks: [default, traefik_public]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik_public"
+      - "traefik.http.routers.desk-api.rule=Host(`leads.yincools.com.ng`) && (PathPrefix(`/api`) || PathPrefix(`/ws`) || PathPrefix(`/admin`) || PathPrefix(`/static`))"
+      - "traefik.http.routers.desk-api.entrypoints=websecure"
+      - "traefik.http.routers.desk-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.desk-api.priority=100"
+      - "traefik.http.services.desk-api.loadbalancer.server.port=8000"
+
+  # the engine: bots, engine-held stops, resting paper orders, price alerts.
+  # Separate from web so a website crash or redeploy never stops it.
+  platform-engine:
+    image: ${PLATFORM_IMAGE:-samadeolu7/trade-desk-platform:latest}
+    container_name: trade_desk_engine
+    restart: unless-stopped
+    env_file: [.env]
+    environment: *platform_env
+    command: ["python", "manage.py", "run_engine"]
+    depends_on:
+      platform-migrate: {condition: service_completed_successfully}
+      platform-redis: {condition: service_healthy}
+    healthcheck:
+      disable: true
+
+  # research jobs from the app, plus the engine-down watchdog
+  platform-worker:
+    image: ${PLATFORM_IMAGE:-samadeolu7/trade-desk-platform:latest}
+    container_name: trade_desk_worker
+    restart: unless-stopped
+    env_file: [.env]
+    environment: *platform_env
+    command: ["python", "manage.py", "run_worker"]
+    depends_on:
+      platform-migrate: {condition: service_completed_successfully}
+    healthcheck:
+      disable: true
+
+  platform-frontend:
+    image: ${FRONTEND_IMAGE:-samadeolu7/trade-desk-frontend:latest}
+    container_name: trade_desk_frontend
+    restart: unless-stopped
+    networks: [traefik_public]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik_public"
+      - "traefik.http.routers.desk.rule=Host(`leads.yincools.com.ng`)"
+      - "traefik.http.routers.desk.entrypoints=websecure"
+      - "traefik.http.routers.desk.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.desk.priority=10"
+      - "traefik.http.services.desk.loadbalancer.server.port=80"
+      - "traefik.http.routers.desk-http.rule=Host(`leads.yincools.com.ng`)"
+      - "traefik.http.routers.desk-http.entrypoints=web"
+      - "traefik.http.routers.desk-http.middlewares=desk-https"
+      - "traefik.http.middlewares.desk-https.redirectscheme.scheme=https"
+
+  # nightly database dump, 14 kept, in the platform_backups volume
+  platform-backup:
+    image: postgres:16-alpine
+    container_name: trade_desk_backup
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - platform_backups:/backups
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          pg_dump -h platform-db -U trade -d trade -Fc -f /backups/trade-$$(date -u +%Y%m%d-%H%M).dump             && ls -1t /backups/*.dump | tail -n +15 | xargs -r rm --
+          sleep 86400
+        done
+    depends_on:
+      platform-db: {condition: service_healthy}
+
 volumes:
   trade_bot_data:
   trade_bot_logs:
+  platform_db:
+  platform_backups:
+
+networks:
+  traefik_public:
+    external: true
+    name: traefik_public

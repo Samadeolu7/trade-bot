@@ -1,0 +1,32 @@
+# One image for the web platform's processes (web, engine, worker, migrate);
+# docker-compose picks the command. Built from the repo root because the
+# platform imports the strategy library in bot/ and reads config/.
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY requirements.txt requirements-bot.txt
+COPY backend/requirements.txt requirements-platform.txt
+RUN pip install --no-cache-dir -r requirements-bot.txt -r requirements-platform.txt
+
+COPY bot/ bot/
+COPY config/ config/
+COPY backend/ backend/
+
+RUN useradd -m -u 1000 appuser \
+    && mkdir -p /app/backend/staticfiles \
+    && DJANGO_DEBUG=1 python backend/manage.py collectstatic --noinput -v0 \
+    && chown -R appuser:appuser /app
+
+USER appuser
+WORKDIR /app/backend
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=5 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/auth/csrf', timeout=4)" || exit 1
+
+CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "--proxy-headers", "config.asgi:application"]

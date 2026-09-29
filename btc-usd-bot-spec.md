@@ -254,6 +254,44 @@ A second, independent alert channel — **not** the automated Quidax-fee shadow-
 - All secrets via environment variables injected at deploy time, not baked into the image.
 - Optional: a lightweight health-check/status endpoint for monitoring.
 
+## 12.5. Web platform (2026-09-29)
+
+A trading app replaces the Koya lead scorer at `leads.yincools.com.ng`. The user wanted a standard
+trading app: trade by hand while bots trade on the same or separate accounts, see what each bot is doing
+on a chart, run research, and move from paper to live without UI changes. Decisions:
+
+- **Venues.** Bots trade live on Quidax spot (Section 10). Manual Exness MT5 trading stays advisory via
+  the recommend feed (Section 9.5). An MT5 connector would need a Windows bridge; possible later behind the
+  same broker interface.
+- **Stack.** Django + Django Ninja + Channels, Postgres, Redis, React. The engine is its own process.
+- **One broker interface** (`bot/broker/`). Paper accounts use `PaperBroker` with a venue profile; live
+  accounts will use a Quidax connector. The contract tests in `tests/test_paper_broker.py` are the bar the
+  live connector must also pass.
+- **Access.** Owner, trader and viewer roles with per-account grants. Owners and traders need TOTP 2FA.
+  Every order and control action is in the audit log.
+- **Research discipline carries over.** Research jobs from the app use the same train and test windows
+  as `research-report` and never touch the holdout; holdout checks stay a CLI action. A live bot must be
+  named after a strategy label at `automation_ready`, which only a person can set.
+- **Alerts** replace the fixed Telegram message stream: each person picks rules (price crosses, sudden
+  moves, bot trades, stops, problems, research done, daily summary). The recommend feed keeps its own
+  channel until it moves into the engine.
+
+Quidax API findings (2026-09-29), which shape the design:
+
+- Order types are **limit and market only**. There are no stop orders, so stop-losses and take-profits
+  are held by the engine and sent as market orders when the price reaches them, on paper and live alike.
+  Engine uptime therefore protects open positions; the worker alerts if its heartbeat goes stale.
+- The public `/markets/{market}/order_book` endpoint returns raw order records, including years-old
+  filled orders at price 0. `/markets/{market}/depth` returns the real aggregated book (about 28 BTC per
+  side on BTC/USDT, spread 0.07–0.2%), and paper fills walk that.
+- A sub-accounts API exists, so each live bot can get its own sub-account.
+- Unverified until the live connector is built: minimum order size and step, client order IDs (needed to
+  make retries safe), rate limits, and whether fees are charged in the received asset.
+
+Phase 0 research gates before any live money: the pre-registered `donchian_ensemble` holdout check
+(`notes/holdout_validations.md`), and a research report on `donchian` 4h with `donchian.long_only=1`,
+since the spot venue can't take its shorts (`LongOnlyStrategy`, `bot/strategy/long_only.py`).
+
 ## 13. Suggested Build Order
 
 1. **Phase 1 — Data**: Binance read-only connectivity via `ccxt`, OHLCV storage, historical backfill. No exchange account credentials needed yet.

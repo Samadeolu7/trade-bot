@@ -1,0 +1,12 @@
+# the web platform; the strategy library's own needs are in ../requirements.txt
+Django>=5.2,<6
+django-ninja>=1.7,<2
+django-otp>=1.7,<2
+channels>=4.3,<5
+channels-redis>=4.3,<5
+daphne>=4.2,<5
+psycopg[binary]>=3.3,<4
+dj-database-url>=3.1,<4
+qrcode>=8.2,<9
+redis>=5
+pytest-django>=4.14

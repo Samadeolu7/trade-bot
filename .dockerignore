@@ -7,3 +7,6 @@ __pycache__
 data/*.db
 logs/*.log
 .env
+frontend/
+backend/dev.sqlite3
+backend/staticfiles/
