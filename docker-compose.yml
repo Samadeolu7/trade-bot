@@ -72,6 +72,22 @@ services:
       - trade_bot_logs:/app/logs
     command: ["python", "main.py", "shadow", "--strategy", "funding_filtered", "--strategy-label", "donchian_funding_filtered"]
 
+  # Concurrent candidate #6: plain donchian (config's 20/55 channels,
+  # unchanged) on 4h candles instead of 1d. Research reports found it
+  # profitable in both train and test windows on BTC (PF 1.68 / 1.48) and
+  # ETH (PF 1.60 / 1.55) with no 4h-specific tuning — see spec Section 7g.
+  # Standalone (no regime filter), exactly the configuration backtested.
+  trade-bot-donchian-4h:
+    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
+    container_name: btc_trade_bot_donchian_4h
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - trade_bot_data:/app/data
+      - trade_bot_logs:/app/logs
+    command: ["python", "main.py", "shadow", "--strategy", "donchian", "--strategy-label", "donchian_4h", "--timeframe", "4h"]
+
   # Advisory recommendation feed for manual trading (MT5/Exness BTCUSD) — a
   # separate product from the shadow-run paper simulations above, never
   # places an order anywhere. One process covers every strategy listed in
