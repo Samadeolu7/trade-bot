@@ -289,18 +289,20 @@ def _fmt_result_line(label: str, summary: dict | None) -> str:
     )
 
 
-def format_research_report(header: dict, runs: list[tuple[str, dict | None, dict | None]]) -> list[str]:
+def format_research_report(header: dict, runs: list[tuple], title: str = "RESEARCH_REPORT") -> list[str]:
     """A backtest batch as plain text meant to be copy-pasted back into a
     chat with Claude in one go — so it's compact, one line per window, and
     self-describing (windows, fees, data range) rather than relying on
-    context the reader won't have. `runs` is [(label, train_summary,
-    test_summary)]. Returns one or more messages, split on run boundaries
-    to stay under Telegram's length limit."""
-    head = _kv_lines("RESEARCH_REPORT", header)
-    blocks = [
-        "\n".join([f"[{label}]", _fmt_result_line("train", train), _fmt_result_line("test ", test)])
-        for label, train, test in runs
-    ]
+    context the reader won't have. Each run is (label, train_summary,
+    test_summary), or (label, [(window_name, summary), ...]) for other
+    window sets such as a holdout check. Returns one or more messages,
+    split on run boundaries to stay under Telegram's length limit."""
+    head = _kv_lines(title, header)
+    blocks = []
+    for run in runs:
+        label = run[0]
+        windows = [("train", run[1]), ("test ", run[2])] if len(run) == 3 else run[1]
+        blocks.append("\n".join([f"[{label}]"] + [_fmt_result_line(name, summary) for name, summary in windows]))
     footer = "key: n=trades ret=return dd=max drawdown pf=profit factor bh=buy&hold\nnote=paste this whole message back to Claude"
 
     messages: list[str] = []
@@ -308,7 +310,7 @@ def format_research_report(header: dict, runs: list[tuple[str, dict | None, dict
     for block in blocks:
         if len(current) + len(block) + len(footer) + 4 > TELEGRAM_MAX_CHARS:
             messages.append(current)
-            current = "RESEARCH_REPORT (continued)"
+            current = f"{title} (continued)"
         current += "\n\n" + block
     messages.append(current + "\n\n" + footer)
     if len(messages) > 1:

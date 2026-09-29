@@ -701,6 +701,14 @@ def main() -> None:
     research_parser.add_argument(
         "--no-telegram", action="store_true", help="print the report only, don't send it"
     )
+    research_parser.add_argument(
+        "--holdout",
+        action="store_true",
+        help="the one deliberate check on the reserved holdout window (validation.holdout_start "
+        "onward) instead of train/test: exactly one configuration (no variant grid), logged as "
+        "having touched the holdout. Pre-register the config and pass criteria in "
+        "notes/holdout_validations.md first.",
+    )
 
     experiments_parser = subparsers.add_parser(
         "experiments",
@@ -889,9 +897,13 @@ def main() -> None:
     elif args.command == "research-report":
         all_df = query_candles_df(conn, exchange_id, symbol, args.timeframe)
         holdout_start = config.get("validation", {}).get("holdout_start")
-        # never touches the holdout, no override — this is routine research
-        all_df, _ = apply_holdout_guard(
-            all_df, holdout_start, allow_holdout=False, context_label=f"research-report {args.strategy}"
+        if args.holdout and not holdout_start:
+            parser.error("--holdout needs validation.holdout_start set in config.yaml")
+        # routine reports never touch the holdout; --holdout is the one
+        # deliberate exception, and only then is the window included
+        all_df, touched_holdout = apply_holdout_guard(
+            all_df, holdout_start, allow_holdout=args.holdout,
+            context_label=f"research-report {args.strategy}",
         )
         train_df = all_df[
             (all_df.index >= pd.Timestamp(args.train_start, tz="UTC"))
@@ -911,8 +923,9 @@ def main() -> None:
                 warmup_df=warmup_df,
             )
             _record_experiment(
-                conn, "research_report", name, name, symbol, args.timeframe, window_df,
-                touched_holdout=False, strategy_config=strategy_config, summary=summary,
+                conn, "holdout_check" if args.holdout else "research_report", name, name, symbol,
+                args.timeframe, window_df, touched_holdout=args.holdout,
+                strategy_config=strategy_config, summary=summary,
             )
             return summary
 
@@ -928,6 +941,53 @@ def main() -> None:
                 )
         sections_keys = [(section, key) for section, key, _ in grid]
         combos = list(itertools.product(*[values for _, _, values in grid])) if grid else [()]
+        if args.holdout and len(combos) > 1:
+            # comparing variants on the holdout and keeping the best is
+            # exactly the selection the reserved window exists to prevent
+            parser.error("--holdout checks exactly one configuration: give each --param a single value")
+
+        if args.holdout:
+            holdout_df = all_df[all_df.index >= pd.Timestamp(holdout_start, tz="UTC")]
+            if len(holdout_df) == 0:
+                parser.error(f"no candles from {holdout_start} onward — backfill first")
+            strategy_config = base_strategy_config
+            for (section, key), value in zip(sections_keys, combos[0]):
+                strategy_config = _with_override(strategy_config, section, key, value)
+            params_label = ", ".join(f"{k}={v}" for (_, k), v in zip(sections_keys, combos[0]))
+            runs = [(
+                f"{args.strategy} {params_label}" if params_label else f"{args.strategy} (defaults)",
+                [("holdout", run_window(args.strategy, strategy_config, holdout_df))],
+            )]
+            if args.baseline != "none":
+                runs.append((
+                    f"baseline: {args.baseline}",
+                    [("holdout", run_window(args.baseline, base_strategy_config, holdout_df))],
+                ))
+            header = {
+                "check": "HOLDOUT — one deliberate look, see notes/holdout_validations.md",
+                "strategy": args.strategy,
+                "symbol": symbol,
+                "timeframe": args.timeframe,
+                "holdout": f"{_fmt_date(holdout_df.index.min())}..{_fmt_date(holdout_df.index.max())} ({len(holdout_df)} bars)",
+                "costs": (
+                    f"fee={backtest_config.get('fee', 0.001)} slippage={backtest_config.get('slippage', 0.0005)} "
+                    f"risk/trade={backtest_config.get('risk_pct', 0.01) * 100:g}%"
+                ),
+            }
+            messages = format_research_report(header, runs, title="HOLDOUT_CHECK")
+            for message in messages:
+                print(message)
+                print()
+            if touched_holdout:
+                log_holdout_validation(
+                    args.strategy, symbol, args.timeframe, holdout_start, None,
+                    {label: windows[0][1] for label, windows in runs},
+                )
+            if not args.no_telegram:
+                alerter = TelegramAlerter(os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID"))
+                for message in messages:
+                    alerter.send(message)
+            return
 
         runs = []
         for combo in combos:

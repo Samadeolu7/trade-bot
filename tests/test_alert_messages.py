@@ -267,3 +267,17 @@ def test_exposure_rebalance_advisory_variant():
     lines = msg.splitlines()
     assert lines[0] == "RECOMMENDATION_REBALANCE"
     assert lines[-1] == "note=for your review — no order placed; resize your MT5 position to match"
+
+
+def test_research_report_supports_other_window_sets_and_titles():
+    from bot.alerting.messages import format_research_report
+
+    summary = {"trades": 3, "total_return_pct": 5.0}
+    msg = format_research_report(
+        {"check": "HOLDOUT"}, [("ens", [("holdout", summary)])], title="HOLDOUT_CHECK"
+    )[0]
+    lines = msg.splitlines()
+    assert lines[0] == "HOLDOUT_CHECK"
+    assert "[ens]" in lines
+    assert any(line.startswith(" holdout: n=3 ret=+5.00%") for line in lines)
+    assert not any("train" in line for line in lines)

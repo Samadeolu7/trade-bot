@@ -29,6 +29,11 @@ on:
         description: "Baseline strategy on the same windows, or 'none'"
         default: "donchian"
         required: true
+      holdout:
+        description: "The one deliberate check on the reserved holdout window (pre-register it in notes/holdout_validations.md first)"
+        type: choice
+        options: ["no", "yes"]
+        default: "no"
 
 env:
   DEPLOY_PATH: /opt/btc-trade-bot
@@ -46,6 +51,7 @@ jobs:
           TIMEFRAME: ${{ inputs.timeframe }}
           PARAMS: ${{ inputs.params }}
           BASELINE: ${{ inputs.baseline }}
+          HOLDOUT: ${{ inputs.holdout }}
         run: |
           [[ "$STRATEGY" =~ ^[a-z_]+(,[a-z_]+)*$ ]] || { echo "bad strategy"; exit 1; }
           # --param sections are per-strategy, so they can't be shared across a list
@@ -54,6 +60,8 @@ jobs:
           [[ "$TIMEFRAME" =~ ^[0-9]+[mhdw]$ ]] || { echo "bad timeframe"; exit 1; }
           [[ "$BASELINE" =~ ^[a-z_]+$ ]] || { echo "bad baseline"; exit 1; }
           [[ "$PARAMS" =~ ^[-a-zA-Z0-9_.,=\ ]*$ ]] || { echo "bad params"; exit 1; }
+          [[ "$HOLDOUT" == "no" || "$HOLDOUT" == "yes" ]] || { echo "bad holdout"; exit 1; }
+          if [[ "$HOLDOUT" == "yes" && "$STRATEGY" == *,* ]]; then echo "holdout checks one strategy at a time"; exit 1; fi
 
       - name: Run report on server
         uses: appleboy/ssh-action@v1.0.3
@@ -63,11 +71,12 @@ jobs:
           TIMEFRAME: ${{ inputs.timeframe }}
           PARAMS: ${{ inputs.params }}
           BASELINE: ${{ inputs.baseline }}
+          HOLDOUT: ${{ inputs.holdout }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: STRATEGY,SYMBOL,TIMEFRAME,PARAMS,BASELINE
+          envs: STRATEGY,SYMBOL,TIMEFRAME,PARAMS,BASELINE,HOLDOUT
           command_timeout: 60m
           script: |
             set -e
@@ -81,11 +90,13 @@ jobs:
               --symbol "$SYMBOL" --timeframe "$TIMEFRAME" --start 2018-01-01T00:00:00Z --no-resume
             # sequential on purpose: one SQLite writer at a time alongside the
             # live shadow runs. One strategy failing doesn't stop the rest.
+            extra=""
+            if [ "$HOLDOUT" = "yes" ]; then extra="--holdout"; fi
             failed=""
             for s in $(echo "$STRATEGY" | tr "," " "); do
               echo "==> research-report $s"
               docker compose run --rm trade-bot python main.py research-report \
-                --strategy "$s" --symbol "$SYMBOL" --timeframe "$TIMEFRAME" --baseline "$BASELINE" $PARAMS \
+                --strategy "$s" --symbol "$SYMBOL" --timeframe "$TIMEFRAME" --baseline "$BASELINE" $PARAMS $extra \
                 || failed="$failed $s"
             done
             if [ -n "$failed" ]; then echo "FAILED:$failed"; exit 1; fi
