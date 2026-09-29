@@ -185,10 +185,11 @@ def maybe_send_daily_summary(
         timeframe,
     )
     diagnosis = strategy.diagnose(df) if len(df) >= strategy.min_lookback else {}
+    current_price = float(df["close"].iloc[-1]) if len(df) else None
     sent = alerter.send(
         format_daily_summary(
             symbol, timeframe, strategy_label, open_position, trades_today, trades_all_time,
-            total_pnl_pct, diagnosis,
+            total_pnl_pct, diagnosis, current_price,
         )
     )
     if sent:

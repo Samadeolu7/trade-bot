@@ -8,7 +8,34 @@ Every message carries `strategy` — with multiple shadow runs posting to the
 same chat concurrently, the header line alone doesn't say which strategy an
 alert belongs to."""
 
+import pandas as pd
+
 from bot.strategy.base import Signal
+
+
+def _fmt_time(value) -> str:
+    """Positions are stored with epoch-millisecond entry times, which are
+    unreadable in a Telegram message. Render those (and pandas Timestamps) as
+    a UTC date — plus a clock time only when it isn't midnight, since daily
+    bars all open at 00:00. Strings are assumed already human-readable."""
+    if value is None or isinstance(value, str):
+        return value
+    if isinstance(value, (int, float)):
+        ts = pd.Timestamp(int(value), unit="ms", tz="UTC")
+    elif isinstance(value, pd.Timestamp):
+        ts = value.tz_localize("UTC") if value.tzinfo is None else value.tz_convert("UTC")
+    else:
+        return value
+    if ts == ts.normalize():
+        return ts.strftime("%Y-%m-%d")
+    return ts.strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _pct_move(direction: str, entry: float, price: float) -> float:
+    """% gain (positive) or loss (negative) of moving from entry to price, for
+    a position in `direction`."""
+    move = (price - entry) / entry * 100
+    return move if direction == "long" else -move
 
 
 def _kv_lines(header: str, fields: dict) -> str:
@@ -30,7 +57,7 @@ def format_signal_message(signal: Signal, symbol: str, timeframe: str, strategy_
             "stop": f"{signal.stop_loss:.2f}",
             "target": f"{signal.take_profit:.2f}" if signal.take_profit is not None else None,
             "reason": signal.reason,
-            "time": signal.timestamp,
+            "time": _fmt_time(signal.timestamp),
         },
     )
 
@@ -57,9 +84,37 @@ def format_exit_message(
             "exit": f"{exit_price:.2f}",
             "pnl_pct": f"{pnl_pct:.2f}",
             "reason": exit_reason,
-            "time": exit_time,
+            "time": _fmt_time(exit_time),
         },
     )
+
+
+def _summary_sentence(
+    open_position: dict | None, current_price: float | None, trades_all_time: int, total_pnl_pct: float,
+) -> str:
+    closed = (
+        f"Closed trades so far: {trades_all_time}, total {total_pnl_pct:+.2f}%."
+        if trades_all_time
+        else "No closed trades yet."
+    )
+    if open_position is None:
+        return f"No open position. {closed}"
+    direction = open_position["direction"]
+    entry = open_position["entry_price"]
+    stop = open_position["stop"]
+    parts = [
+        f"Holding {direction.upper()} since {_fmt_time(open_position['entry_time'])} "
+        f"at {entry:,.2f}."
+    ]
+    if current_price is not None:
+        parts.append(
+            f"Now {current_price:,.2f} ({_pct_move(direction, entry, current_price):+.2f}% open, not yet locked in)."
+        )
+    stop_result = _pct_move(direction, entry, stop)
+    outcome = "a profit" if stop_result >= 0 else "a loss"
+    parts.append(f"Stop {stop:,.2f} — if hit, the trade closes at {outcome} of {abs(stop_result):.2f}%.")
+    parts.append(f"{closed} (The open trade isn't counted until it closes.)")
+    return " ".join(parts)
 
 
 def format_daily_summary(
@@ -71,23 +126,31 @@ def format_daily_summary(
     trades_all_time: int,
     total_pnl_pct: float,
     diagnosis: dict | None = None,
+    current_price: float | None = None,
 ) -> str:
     if open_position is not None:
         position_line = (
-            f"{open_position['direction']} since {open_position['entry_time']}, "
+            f"{open_position['direction']} since {_fmt_time(open_position['entry_time'])}, "
             f"entry={open_position['entry_price']:.2f}, stop={open_position['stop']:.2f}"
         )
     else:
         position_line = "flat"
     fields = {
         "strategy": strategy_label,
+        "summary": _summary_sentence(open_position, current_price, trades_all_time, total_pnl_pct),
         "symbol": symbol,
         "timeframe": timeframe,
         "position": position_line,
+    }
+    if open_position is not None and current_price is not None:
+        direction = open_position["direction"]
+        fields["unrealized_pnl_pct"] = f"{_pct_move(direction, open_position['entry_price'], current_price):.2f}"
+        fields["stop_distance_pct"] = f"{abs(current_price - open_position['stop']) / current_price * 100:.2f}"
+    fields.update({
         "trades_today": trades_today,
         "trades_all_time": trades_all_time,
         "cumulative_pnl_pct": f"{total_pnl_pct:.2f}",
-    }
+    })
     # for sanity-checking the bot's read of the market against your own —
     # near_miss_key is an internal de-dup token, not meant for a human reader
     for key, value in (diagnosis or {}).items():
@@ -132,7 +195,7 @@ def format_recommendation_entry(
         "stop": f"{signal.stop_loss:.2f}",
         "target": f"{signal.take_profit:.2f}" if signal.take_profit is not None else None,
         "reason": signal.reason,
-        "time": signal.timestamp,
+        "time": _fmt_time(signal.timestamp),
     }
     for key, value in signal.context.items():
         fields[f"ctx_{key}"] = value
@@ -164,7 +227,7 @@ def format_recommendation_exit(
             "exit": f"{exit_price:.2f}",
             "pnl_pct": f"{pnl_pct:.2f}",
             "reason": exit_reason,
-            "time": exit_time,
+            "time": _fmt_time(exit_time),
             "note": "for your review — no order placed",
         },
     )
@@ -181,12 +244,17 @@ def format_recommendation_stop_update(
     """The shadow runner updates a trailing stop silently in the DB — for a
     manually-managed MT5 position, the moved stop has to actually reach the
     user or their real stop order goes stale."""
+    change = new_stop - old_stop
     return _kv_lines(
         "RECOMMENDATION_STOP_UPDATE",
         {
             "strategy": strategy_label,
             "symbol": symbol,
             "timeframe": timeframe,
+            "action": (
+                f"Move your MT5 stop-loss on the {symbol} {direction} from {old_stop:,.2f} to "
+                f"{new_stop:,.2f} ({'up' if change > 0 else 'down'} {abs(change):,.2f})"
+            ),
             "direction": direction,
             "old_stop": f"{old_stop:.2f}",
             "new_stop": f"{new_stop:.2f}",

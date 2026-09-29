@@ -148,3 +148,54 @@ def test_recommendation_stop_update_structure():
     assert "old_stop=60000.00" in lines
     assert "new_stop=61000.00" in lines
     assert "note=update your MT5 stop-loss order to match" in lines
+
+
+def test_daily_summary_renders_epoch_ms_entry_time_as_date():
+    open_position = {"direction": "long", "entry_time": 1790035200000, "entry_price": 86669.12, "stop": 62535.24}
+    msg = format_daily_summary("BTC/USDT", "1d", "donchian", open_position, 0, 1, -9.17)
+    assert "position=long since 2026-09-22, entry=86669.12, stop=62535.24" in msg.splitlines()
+
+
+def test_daily_summary_reports_unrealized_pnl_and_stop_outcome():
+    open_position = {"direction": "long", "entry_time": 1790035200000, "entry_price": 80000.0, "stop": 60000.0}
+    msg = format_daily_summary("BTC/USDT", "1d", "donchian", open_position, 0, 1, -9.17, current_price=84000.0)
+    lines = msg.splitlines()
+    assert "unrealized_pnl_pct=5.00" in lines
+    assert "stop_distance_pct=28.57" in lines
+    summary = next(line for line in lines if line.startswith("summary="))
+    assert "Holding LONG since 2026-09-22 at 80,000.00." in summary
+    assert "+5.00% open" in summary
+    assert "closes at a loss of 25.00%" in summary
+    assert "Closed trades so far: 1, total -9.17%." in summary
+
+
+def test_daily_summary_short_stop_above_entry_is_a_loss():
+    open_position = {"direction": "short", "entry_time": 1790035200000, "entry_price": 80000.0, "stop": 84000.0}
+    msg = format_daily_summary("BTC/USDT", "1d", "donchian", open_position, 0, 0, 0.0, current_price=76000.0)
+    lines = msg.splitlines()
+    assert "unrealized_pnl_pct=5.00" in lines
+    summary = next(line for line in lines if line.startswith("summary="))
+    assert "closes at a loss of 5.00%" in summary
+    assert "No closed trades yet." in summary
+
+
+def test_daily_summary_trailed_stop_above_entry_is_a_locked_profit():
+    open_position = {"direction": "long", "entry_time": 1789430400000, "entry_price": 78241.30, "stop": 83163.68}
+    msg = format_daily_summary("BTC/USDT", "1d", "multi_timeframe", open_position, 0, 0, 0.0, current_price=84454.56)
+    summary = next(line for line in msg.splitlines() if line.startswith("summary="))
+    assert "closes at a profit of 6.29%" in summary
+
+
+def test_daily_summary_flat_summary_sentence():
+    msg = format_daily_summary("BTC/USDT", "1d", "donchian", None, 0, 5, 3.21)
+    assert "summary=No open position. Closed trades so far: 5, total +3.21%." in msg.splitlines()
+
+
+def test_recommendation_stop_update_has_plain_english_action():
+    msg = format_recommendation_stop_update(
+        "BTC/USDT", "1d", "reco_donchian_adx_control", "long", 62300.0, 62535.24,
+    )
+    assert (
+        "action=Move your MT5 stop-loss on the BTC/USDT long from 62,300.00 to 62,535.24 (up 235.24)"
+        in msg.splitlines()
+    )
