@@ -118,6 +118,20 @@ Plain CRT is a clear negative, with a far bigger sample than most results here (
 
 **ETH/USDT 4h cross-check (same untuned 20/55 settings):** train 92 trades, PF 1.60, +25.54%, -8.66% max DD; test 52 trades, PF 1.55, +11.24%, -6.65% max DD, against an ETH buy&hold of -13.60% over the test window. Both assets, both windows, profit factor between 1.48 and 1.68. That's the most consistent result this project has produced. Compare daily donchian's cross-asset table above: BTC breakeven, SOL failing. Caveats: BTC and ETH are highly correlated, so this is weaker than truly independent evidence. Win rate is ~35%, so it relies on a few big winners, and returns are modest at 1% risk per trade. Recommendation: shadow-run donchian on 4h alongside the daily control before anything else.
 
+**4h sweep of every other strategy (2026-09-29, BTC/USDT, same windows, config defaults except `multi_timeframe.approx_htf_period_bars=42`, since the default of 7 assumes daily bars and leaves too little history for its weekly SMA on 4h, producing zero trades):**
+
+| Strategy | Train trades / PF / return | Test trades / PF / return |
+|---|---|---|
+| donchian (baseline, shadowing as `donchian_4h`) | 96 / 1.68 / +30.21% | 46 / 1.48 / +8.09% |
+| regime_switched (donchian + ADX gate) | 76 / 1.89 / +25.99% | 37 / 1.39 / +4.68% |
+| funding_filtered (donchian + funding veto) | 96 / 1.66 / +29.11% | 46 / 1.48 / +8.09% |
+| vol_expansion | 221 / 0.59 / -37.29% | 108 / 0.57 / -22.64% |
+| multi_timeframe | 365 / 0.70 / -44.50% | 211 / 0.39 / -51.45% |
+| ema_cross | 155 / 0.46 / -31.61% | 78 / 0.37 / -23.46% |
+| market_structure | 491 / 0.50 / -83.43% | 263 / 0.46 / -59.46% |
+
+Only the donchian family works on 4h, and plain donchian is the best of it on the test window. The ADX gate trims trades and slightly improves train PF, but gives up test return. At the ±0.0005 thresholds, the funding veto almost never fires on 4h (a single train trade differs), so it's effectively plain donchian. The other four lose in both windows. That includes ema_cross, consistent with the old "1h/4h overtrade badly" note, which came from ema_cross. These 4h failures say nothing about the *daily* versions of vol_expansion and multi_timeframe that are currently shadowing, which still have no logged backtest verdict of their own.
+
 **Explicitly not included: naive grid trading.** It's the most heavily marketed "profitable" crypto bot strategy, but the claims behind it are almost entirely exchange marketing rather than reproducible backtests, and its mechanics are structurally built for sideways markets — a strong sustained trend drives price outside the grid and leaves it holding unrealized losing positions, the same failure mode that made the Bollinger mean-reversion strategy above the worst performer in the real test (65.7% win rate, only +10.4% return, 52.7% drawdown). If it's added later, it needs a hard "pause during confirmed trend" kill-switch tied to the same regime filter as everything else, not a standalone always-on strategy.
 
 **Evidence note for Claude Code:** strategies (a) and (e) above were validated against an independent, reproducible backtest (CoinQuant, BTCUSDT daily candles, Jan 2021–Aug 2026, Binance 0.1% taker fees included, spans the 2021 bull run, 2022 crash, and 2023–26 cycle). None of the five strategy families tested there beat plain buy-and-hold Bitcoin on raw return over that window — their edge was a much smaller drawdown and far less time exposed to the market, not higher absolute profit. Treat that as the realistic bar: the goal of this bot is a better risk profile than holding, not a guarantee of beating it.
