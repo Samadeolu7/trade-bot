@@ -21,4 +21,4 @@ Pipeline for an idea that looks worth testing:
 
 | Idea | Source | Status | Verdict |
 |---|---|---|---|
-| Candle Range Theory (CRT): sweep of prior candle's high/low, close back inside, target the opposite end | Trading Geek (YouTube), "I Tested The Trading Geek Strategy…" | implemented (`crt`), awaiting first research report | — |
+| Candle Range Theory (CRT): sweep of prior candle's high/low, close back inside, target the opposite end | Trading Geek (YouTube), "I Tested The Trading Geek Strategy…" | tested 2026-09-29 (1d) | **Rejected as-is.** Plain CRT lost in both windows (PF 0.69–0.89, 140–258 trades). With a 50-EMA trend filter it lost on train (PF 0.82–0.84) but made money on test (PF 1.12–1.31, 46–65 trades). Inconsistent, so not deployed. The trend filter, not the sweep, looks like the useful part. 4h/killzone version untested. |
