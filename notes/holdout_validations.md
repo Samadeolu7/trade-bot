@@ -41,3 +41,28 @@ and becomes eligible for small real allocations. A pass on ~7 months of
 data does not prove an edge. **What a fail means:** it's removed from the
 recommend feed. The paper run continues for observation, with no retuning
 against this window.
+
+### Result (appended 2026-09-29, after the run; criteria above left unchanged)
+
+Window 2026-03-01..2026-09-29 (1277 4h bars), costs as pre-registered.
+
+| | Return | Max DD | Sharpe | Episodes | Buy & hold |
+|---|---|---|---|---|---|
+| **BTC ensemble (primary)** | +1.90% | -4.83% | 0.46 | 8 | +23.23% |
+| ETH ensemble (secondary) | +5.04% | -2.75% | 1.12 | 7 | +32.49% |
+| BTC donchian 4h (context only) | +3.50% | -3.04% | 1.16 | 12 | +23.23% |
+| ETH donchian 4h (context only) | -1.63% | -4.06% | -0.53 | 16 | +32.49% |
+
+**Primary: PASS.** All three criteria met: return +1.90% > 0, Sharpe 0.46 > 0,
+max DD -4.83% within -20%. **Secondary (ETH): PASS**, confirming it.
+
+**Honest reading: a thin pass.** The criteria were deliberately modest for a
+7-month window, and the ensemble cleared them without much room. On BTC it
+made +1.9% while buy & hold made +23.2%. It trailed plain donchian on BTC
+(Sharpe 0.46 vs 1.16) and beat it on ETH (1.12 vs -0.53). The low drawdowns
+mostly reflect low average exposure, not skill. This is consistent with what
+vol-targeted trend following is: it gives up a lot of a strong uptrend in
+exchange for drawdown control, rather than keeping pace with it. Per the
+pre-registered consequences, it keeps its paper and recommend runs and
+becomes eligible for *small* real allocations. Nothing here justifies
+sizing up. The window is now spent for this strategy.
