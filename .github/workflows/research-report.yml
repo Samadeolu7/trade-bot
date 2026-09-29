@@ -1,0 +1,72 @@
+name: Research Report
+
+# Manual button (Actions tab -> Research Report -> Run workflow): backfills
+# candles on the VPS, backtests a strategy on the train/test windows plus a
+# baseline, and sends the results to Telegram as one copy-pasteable
+# RESEARCH_REPORT message. Runs inside the already-deployed image, so the
+# strategy being tested must already be merged to master and deployed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      strategy:
+        description: "Strategy to test (e.g. crt, donchian, vol_expansion)"
+        default: "crt"
+        required: true
+      timeframe:
+        description: "Candle timeframe (1d, 4h, 1h)"
+        default: "1d"
+        required: true
+      params:
+        description: "Variants to compare, sweep syntax (blank = config defaults only)"
+        default: "--param crt.target=range,rr --param crt.trend_ema_period=0,50"
+        required: false
+      baseline:
+        description: "Baseline strategy on the same windows, or 'none'"
+        default: "donchian"
+        required: true
+
+env:
+  DEPLOY_PATH: /opt/btc-trade-bot
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      # inputs end up in a remote shell command — only allow the characters
+      # the CLI arguments legitimately need
+      - name: Validate inputs
+        env:
+          STRATEGY: ${{ inputs.strategy }}
+          TIMEFRAME: ${{ inputs.timeframe }}
+          PARAMS: ${{ inputs.params }}
+          BASELINE: ${{ inputs.baseline }}
+        run: |
+          [[ "$STRATEGY" =~ ^[a-z_]+$ ]] || { echo "bad strategy"; exit 1; }
+          [[ "$TIMEFRAME" =~ ^[0-9]+[mhdw]$ ]] || { echo "bad timeframe"; exit 1; }
+          [[ "$BASELINE" =~ ^[a-z_]+$ ]] || { echo "bad baseline"; exit 1; }
+          [[ "$PARAMS" =~ ^[-a-zA-Z0-9_.,=\ ]*$ ]] || { echo "bad params"; exit 1; }
+
+      - name: Run report on server
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          STRATEGY: ${{ inputs.strategy }}
+          TIMEFRAME: ${{ inputs.timeframe }}
+          PARAMS: ${{ inputs.params }}
+          BASELINE: ${{ inputs.baseline }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: STRATEGY,TIMEFRAME,PARAMS,BASELINE
+          command_timeout: 20m
+          script: |
+            set -e
+            cd ${{ env.DEPLOY_PATH }}
+            # --no-resume: re-fetch full history from 2020 (idempotent upsert),
+            # so a timeframe the live poller only ever seeded recently still
+            # gets its whole train window
+            docker compose run --rm trade-bot python main.py backfill \
+              --symbol BTC/USDT --timeframe "$TIMEFRAME" --start 2020-01-01T00:00:00Z --no-resume
+            docker compose run --rm trade-bot python main.py research-report \
+              --strategy "$STRATEGY" --timeframe "$TIMEFRAME" --baseline "$BASELINE" $PARAMS

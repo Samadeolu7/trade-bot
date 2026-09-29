@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from bot.alerting.messages import format_research_report
 from bot.alerting.telegram import TelegramAlerter
 from bot.backtest.engine import run_backtest
 from bot.backtest.metrics import breakdown_by_strategy, summarize
@@ -35,6 +36,7 @@ from bot.storage.db import (
     record_experiment,
     set_experiment_decision,
 )
+from bot.strategy.crt import CandleRangeTheoryStrategy
 from bot.strategy.donchian import DonchianBreakoutStrategy
 from bot.strategy.ema_cross import EmaCrossStrategy
 from bot.strategy.flat import FlatStrategy
@@ -51,7 +53,7 @@ logger = logging.getLogger(__name__)
 
 STRATEGY_CHOICES = [
     "ema_cross", "rsi_bb", "donchian", "market_structure", "multi_timeframe", "vol_expansion",
-    "funding_filtered", "regime_switched",
+    "funding_filtered", "regime_switched", "crt",
 ]
 TREND_STRATEGY_CHOICES = [
     "ema_cross", "donchian", "market_structure", "multi_timeframe", "vol_expansion",
@@ -326,6 +328,10 @@ def _record_experiment(
         logger.exception("failed to record experiment — continuing, this is diagnostic only")
 
 
+def _fmt_date(ts) -> str:
+    return pd.Timestamp(ts).strftime("%Y-%m-%d")
+
+
 HOLDOUT_LOG_PATH = Path("notes/holdout_validations.md")
 
 
@@ -389,6 +395,8 @@ def _build_strategy(
         return MultiTimeframeTrendPullbackStrategy(strategy_config.get("multi_timeframe", {}))
     if name == "vol_expansion":
         return VolatilityExpansionBreakoutStrategy(strategy_config.get("vol_expansion", {}))
+    if name == "crt":
+        return CandleRangeTheoryStrategy(strategy_config.get("crt", {}))
     if name == "funding_filtered":
         # base_strategy/high_threshold/low_threshold are config-driven (same
         # pattern as regime_switched's trend_strategy), not separate
@@ -631,6 +639,36 @@ def main() -> None:
     recommend_parser.add_argument("--timeframe", default=None)
     recommend_parser.add_argument("--interval", type=int, default=None, help="seconds between checks")
 
+    research_parser = subparsers.add_parser(
+        "research-report",
+        help="Backtest a strategy on the train and test windows (plus a baseline) and send the "
+        "results to Telegram in a copy-paste-friendly format",
+    )
+    research_parser.add_argument("--strategy", choices=STRATEGY_CHOICES, required=True)
+    research_parser.add_argument("--timeframe", default="1d")
+    research_parser.add_argument(
+        "--param",
+        action="append",
+        default=[],
+        help="repeatable, same syntax as sweep — every combination is reported as its own variant, "
+        "e.g. --param crt.target=range,rr --param crt.trend_ema_period=0,50",
+    )
+    research_parser.add_argument(
+        "--baseline",
+        default="donchian",
+        help="strategy run on the same windows for comparison (config defaults), or 'none'",
+    )
+    research_parser.add_argument("--train-start", default="2020-01-01")
+    research_parser.add_argument("--train-end", default="2023-12-31")
+    research_parser.add_argument(
+        "--test-start",
+        default="2024-01-01",
+        help="test window runs from here up to validation.holdout_start (never into the holdout)",
+    )
+    research_parser.add_argument(
+        "--no-telegram", action="store_true", help="print the report only, don't send it"
+    )
+
     experiments_parser = subparsers.add_parser(
         "experiments",
         help="Research log — every backtest/sweep run is recorded (config, data window, git commit, "
@@ -814,6 +852,83 @@ def main() -> None:
         )
         for params_label, summary in rows:
             print(f"{params_label} -> {summary}")
+
+    elif args.command == "research-report":
+        all_df = query_candles_df(conn, exchange_id, symbol, args.timeframe)
+        holdout_start = config.get("validation", {}).get("holdout_start")
+        # never touches the holdout, no override — this is routine research
+        all_df, _ = apply_holdout_guard(
+            all_df, holdout_start, allow_holdout=False, context_label=f"research-report {args.strategy}"
+        )
+        train_df = all_df[
+            (all_df.index >= pd.Timestamp(args.train_start, tz="UTC"))
+            & (all_df.index <= pd.Timestamp(args.train_end, tz="UTC"))
+        ]
+        test_df = all_df[all_df.index >= pd.Timestamp(args.test_start, tz="UTC")]
+        base_strategy_config = config.get("strategy", {})
+        backtest_config = config.get("backtest", {})
+
+        def run_window(name: str, strategy_config: dict, window_df: pd.DataFrame) -> dict | None:
+            if len(window_df) == 0:
+                return None
+            funding_df = _load_funding_df(config, conn) if name == "funding_filtered" else None
+            summary = _run_backtest_once(
+                window_df, name, strategy_config, backtest_config, args.timeframe, funding_df
+            )
+            _record_experiment(
+                conn, "research_report", name, name, symbol, args.timeframe, window_df,
+                touched_holdout=False, strategy_config=strategy_config, summary=summary,
+            )
+            return summary
+
+        grid = [parse_param_arg(p) for p in args.param]
+        sections_keys = [(section, key) for section, key, _ in grid]
+        combos = list(itertools.product(*[values for _, _, values in grid])) if grid else [()]
+
+        runs = []
+        for combo in combos:
+            strategy_config = base_strategy_config
+            for (section, key), value in zip(sections_keys, combo):
+                strategy_config = _with_override(strategy_config, section, key, value)
+            params_label = ", ".join(f"{k}={v}" for (_, k), v in zip(sections_keys, combo))
+            label = f"{args.strategy} {params_label}" if params_label else f"{args.strategy} (defaults)"
+            runs.append((
+                label,
+                run_window(args.strategy, strategy_config, train_df),
+                run_window(args.strategy, strategy_config, test_df),
+            ))
+        if args.baseline != "none":
+            runs.append((
+                f"baseline: {args.baseline}",
+                run_window(args.baseline, base_strategy_config, train_df),
+                run_window(args.baseline, base_strategy_config, test_df),
+            ))
+
+        def span(window_df: pd.DataFrame) -> str:
+            if len(window_df) == 0:
+                return "EMPTY — backfill needed"
+            return f"{_fmt_date(window_df.index.min())}..{_fmt_date(window_df.index.max())} ({len(window_df)} bars)"
+
+        header = {
+            "strategy": args.strategy,
+            "symbol": symbol,
+            "timeframe": args.timeframe,
+            "train": span(train_df),
+            "test": span(test_df),
+            "holdout": f"excluded from {holdout_start}" if holdout_start else "none configured",
+            "costs": (
+                f"fee={backtest_config.get('fee', 0.001)} slippage={backtest_config.get('slippage', 0.0005)} "
+                f"risk/trade={backtest_config.get('risk_pct', 0.01) * 100:g}%"
+            ),
+        }
+        messages = format_research_report(header, runs)
+        for message in messages:
+            print(message)
+            print()
+        if not args.no_telegram:
+            alerter = TelegramAlerter(os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID"))
+            for message in messages:
+                alerter.send(message)
 
     elif args.command == "shadow":
         timeframe = args.timeframe or config["poll"]["timeframe"]

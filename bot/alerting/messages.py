@@ -273,3 +273,44 @@ def format_error_alert(symbol: str, timeframe: str, strategy_label: str, error: 
     return _kv_lines(
         "ERROR", {"strategy": strategy_label, "symbol": symbol, "timeframe": timeframe, "detail": error}
     )
+
+
+TELEGRAM_MAX_CHARS = 4000  # Telegram's hard limit is 4096; leave headroom for the part marker
+
+
+def _fmt_result_line(label: str, summary: dict | None) -> str:
+    if not summary:
+        return f" {label}: no data in window"
+    return (
+        f" {label}: n={summary.get('trades', 0)} ret={summary.get('total_return_pct', 0):+.2f}% "
+        f"dd={summary.get('max_drawdown_pct', 0):.2f}% pf={summary.get('profit_factor', 0):.2f} "
+        f"win={summary.get('win_rate_pct', 0):.1f}% sharpe={summary.get('sharpe_ratio', 0):.2f} "
+        f"bh={summary.get('buy_hold_pct', 0):+.2f}%"
+    )
+
+
+def format_research_report(header: dict, runs: list[tuple[str, dict | None, dict | None]]) -> list[str]:
+    """A backtest batch as plain text meant to be copy-pasted back into a
+    chat with Claude in one go — so it's compact, one line per window, and
+    self-describing (windows, fees, data range) rather than relying on
+    context the reader won't have. `runs` is [(label, train_summary,
+    test_summary)]. Returns one or more messages, split on run boundaries
+    to stay under Telegram's length limit."""
+    head = _kv_lines("RESEARCH_REPORT", header)
+    blocks = [
+        "\n".join([f"[{label}]", _fmt_result_line("train", train), _fmt_result_line("test ", test)])
+        for label, train, test in runs
+    ]
+    footer = "key: n=trades ret=return dd=max drawdown pf=profit factor bh=buy&hold\nnote=paste this whole message back to Claude"
+
+    messages: list[str] = []
+    current = head
+    for block in blocks:
+        if len(current) + len(block) + len(footer) + 4 > TELEGRAM_MAX_CHARS:
+            messages.append(current)
+            current = "RESEARCH_REPORT (continued)"
+        current += "\n\n" + block
+    messages.append(current + "\n\n" + footer)
+    if len(messages) > 1:
+        messages = [f"{m}\n(part {i}/{len(messages)})" for i, m in enumerate(messages, 1)]
+    return messages

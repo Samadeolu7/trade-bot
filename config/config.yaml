@@ -66,6 +66,12 @@ strategy:
     squeeze_percentile: 0.2   # width at/below this percentile of its own trailing history counts as squeezed
     atr_period: 14            # trailing-stop ATR, same mechanism as the other trend strategies
     atr_mult: 2.0
+  crt:                        # Candle Range Theory — research candidate, untested (spec Section 7g)
+    target: range             # range = opposite end of the range candle | rr = fixed rr_multiple x risk
+    rr_multiple: 2.0          # target: rr only
+    min_rr: 1.0               # skip setups with less reward:risk than this to the target
+    stop_buffer_pct: 0.0      # extra room past the sweep wick, as a fraction of price
+    trend_ema_period: 0       # 0 = off; else longs only above / shorts only below this EMA ("HTF alignment")
   funding_filtered:
     base_strategy: donchian   # any TREND_STRATEGY_CHOICES entry — the strategy being filtered
     high_threshold: 0.0005    # veto new longs when funding rate exceeds this (crowded-long risk) — untested guess, sweep it

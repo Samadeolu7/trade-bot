@@ -199,3 +199,35 @@ def test_recommendation_stop_update_has_plain_english_action():
         "action=Move your MT5 stop-loss on the BTC/USDT long from 62,300.00 to 62,535.24 (up 235.24)"
         in msg.splitlines()
     )
+
+
+def test_research_report_is_one_paste_friendly_message():
+    from bot.alerting.messages import format_research_report
+
+    summary = {"trades": 12, "total_return_pct": 3.456, "max_drawdown_pct": -2.1, "profit_factor": 1.4,
+               "win_rate_pct": 58.33, "sharpe_ratio": 0.9, "buy_hold_pct": 80.49}
+    messages = format_research_report(
+        {"strategy": "crt", "timeframe": "1d"},
+        [("crt (defaults)", summary, None), ("baseline: donchian", summary, summary)],
+    )
+    assert len(messages) == 1
+    lines = messages[0].splitlines()
+    assert lines[0] == "RESEARCH_REPORT"
+    assert "strategy=crt" in lines
+    assert "[crt (defaults)]" in lines
+    assert " train: n=12 ret=+3.46% dd=-2.10% pf=1.40 win=58.3% sharpe=0.90 bh=+80.49%" in lines
+    assert " test : no data in window" in lines
+    assert lines[-1] == "note=paste this whole message back to Claude"
+
+
+def test_research_report_splits_long_batches_under_telegram_limit():
+    from bot.alerting.messages import TELEGRAM_MAX_CHARS, format_research_report
+
+    summary = {"trades": 1}
+    runs = [(f"crt variant {i} " + "x" * 80, summary, summary) for i in range(60)]
+    messages = format_research_report({"strategy": "crt"}, runs)
+    assert len(messages) > 1
+    assert all(len(m) <= 4096 for m in messages)
+    assert messages[0].endswith(f"(part 1/{len(messages)})")
+    assert sum(m.count("[crt variant") for m in messages) == 60
+    assert TELEGRAM_MAX_CHARS < 4096
