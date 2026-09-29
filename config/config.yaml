@@ -137,5 +137,14 @@ recommend:
     - label: donchian_4h
       strategy: donchian
       timeframe: 4h
+    # fraction-of-capital strategy: sends RECOMMENDATION_REBALANCE alerts
+    # (resize your position to X% of capital) instead of entry/stop/exit.
+    # Same settings as the donchian_ensemble_4h paper bot.
+    - label: donchian_ensemble_4h
+      strategy: donchian_ensemble
+      timeframe: 4h
+      params:
+        donchian_ensemble.bars_per_day: 6
+        donchian_ensemble.rebalance_threshold: 0.1
     # removed 2026-09-29: multi_timeframe and vol_expansion showed no edge in
     # daily backtests (spec Section 7) — not worth recommending real trades on

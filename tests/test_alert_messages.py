@@ -256,3 +256,14 @@ def test_exposure_summary_line():
         "summary=Holding 40% of capital in BTC/USDT. Paper account 10,500.00 (+5.00% since 2026-09-22), "
         "3 rebalances so far." in msg.splitlines()
     )
+
+
+def test_exposure_rebalance_advisory_variant():
+    from bot.alerting.messages import format_exposure_rebalance
+
+    msg = format_exposure_rebalance(
+        "BTC/USDT", "4h", "reco_ens", 0.0, 0.4, 84000.0, 1790035200000, 10000.0, advisory=True
+    )
+    lines = msg.splitlines()
+    assert lines[0] == "RECOMMENDATION_REBALANCE"
+    assert lines[-1] == "note=for your review — no order placed; resize your MT5 position to match"

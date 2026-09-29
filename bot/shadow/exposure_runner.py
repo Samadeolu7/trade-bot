@@ -70,6 +70,28 @@ def exposure_poll_once(
     # path since entry — a truncated window could silently disagree with
     # the backtest about whether a model is long
     df = drop_incomplete_bar(query_candles_df(conn, exchange_id, symbol, timeframe), timeframe)
+    process_exposure_bars(
+        conn, alerter, exchange_id, symbol, timeframe, strategy, strategy_label, df, fee, slippage
+    )
+
+
+def process_exposure_bars(
+    conn: sqlite3.Connection,
+    alerter: TelegramAlerter,
+    exchange_id: str,
+    symbol: str,
+    timeframe: str,
+    strategy: Strategy,
+    strategy_label: str,
+    df: pd.DataFrame,
+    fee: float,
+    slippage: float,
+    advisory: bool = False,
+) -> None:
+    """Everything after data loading, shared by the paper bot and the
+    recommend feed (advisory=True: RECOMMENDATION_REBALANCE alerts, under
+    the reco_-prefixed label the caller passes). `df` must be the full
+    completed-bar history, for the reason given in exposure_poll_once."""
     if len(df) < strategy.min_lookback:
         logger.info(
             "[%s] not enough complete history yet (%d/%d bars) — skipping",
@@ -130,7 +152,8 @@ def exposure_poll_once(
             )
             alerter.send(
                 format_exposure_rebalance(
-                    symbol, timeframe, strategy_label, from_weight, to_weight, price, ts, equity, diagnosis
+                    symbol, timeframe, strategy_label, from_weight, to_weight, price, ts, equity, diagnosis,
+                    advisory=advisory,
                 )
             )
 

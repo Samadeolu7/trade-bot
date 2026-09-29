@@ -1075,6 +1075,10 @@ def main() -> None:
             label = entry["label"]
             strategy_name = entry["strategy"]
             strategy_config = _apply_strategy_overrides(config.get("strategy", {}), entry)
+            # arbitrary per-entry overrides, e.g. {"donchian_ensemble.bars_per_day": 6}
+            for path, value in (entry.get("params") or {}).items():
+                section, key = path.split(".", 1)
+                strategy_config = _with_override(strategy_config, section, key, value)
 
             funding_df = None
             funding_refresh_fn = None
@@ -1085,8 +1089,6 @@ def main() -> None:
             strategy = _build_strategy(
                 strategy_name, strategy_config, funding_df=funding_df, funding_refresh_fn=funding_refresh_fn
             )
-            if hasattr(strategy, "target_weights"):
-                parser.error(f"{strategy_name} sizes as a fraction of capital; recommend doesn't support that yet")
             strategies.append((label, strategy))
 
         if not strategies:

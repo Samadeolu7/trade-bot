@@ -326,10 +326,13 @@ def format_exposure_rebalance(
     bar_time,
     paper_equity: float,
     diagnosis: dict | None = None,
+    advisory: bool = False,
 ) -> str:
     """A fraction-of-capital strategy (e.g. donchian_ensemble) changed how
     much of the account it holds. Phrased as a percentage of capital so it
-    maps straight onto a manual MT5 position size."""
+    maps straight onto a manual MT5 position size. `advisory` marks it as
+    part of the recommend feed (RECOMMENDATION_REBALANCE) rather than a
+    paper-bot event."""
     change = to_weight - from_weight
     if to_weight == 0:
         action = f"Close the {symbol} position (was {from_weight:.0%} of capital)"
@@ -356,6 +359,9 @@ def format_exposure_rebalance(
         if key in ("near_miss", "near_miss_key", "near_miss_reason"):
             continue
         fields[f"diag_{key}"] = value
+    if advisory:
+        fields["note"] = "for your review — no order placed; resize your MT5 position to match"
+        return _kv_lines("RECOMMENDATION_REBALANCE", fields)
     fields["note"] = "paper trading — no order placed"
     return _kv_lines("EXPOSURE_REBALANCE", fields)
 
