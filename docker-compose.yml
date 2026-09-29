@@ -76,6 +76,23 @@ services:
       - trade_bot_logs:/app/logs
     command: ["python", "main.py", "shadow", "--strategy", "regime_switched", "--strategy-label", "donchian_adx_4h", "--timeframe", "4h"]
 
+  # Concurrent candidate #8: Donchian ensemble with vol-targeted sizing
+  # (spec Section 7h) on 4h. Holds a changing fraction of capital rather
+  # than discrete positions, so it runs the exposure paper loop
+  # (bot/shadow/exposure_runner.py) and sends EXPOSURE_REBALANCE alerts.
+  # Rebalances only on a >=10-point weight change, so it's practical to
+  # follow by hand in MT5 (the backtests used every-bar rebalancing).
+  trade-bot-donchian-ensemble-4h:
+    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
+    container_name: btc_trade_bot_donchian_ensemble_4h
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - trade_bot_data:/app/data
+      - trade_bot_logs:/app/logs
+    command: ["python", "main.py", "shadow", "--strategy", "donchian_ensemble", "--strategy-label", "donchian_ensemble_4h", "--timeframe", "4h", "--param", "donchian_ensemble.bars_per_day=6", "--param", "donchian_ensemble.rebalance_threshold=0.1"]
+
   # Advisory recommendation feed for manual trading (MT5/Exness BTCUSD) — a
   # separate product from the shadow-run paper simulations above, never
   # places an order anywhere. One process covers every strategy listed in

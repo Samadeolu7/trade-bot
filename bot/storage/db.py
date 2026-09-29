@@ -145,6 +145,25 @@ CREATE TABLE IF NOT EXISTS experiments (
 # at") that needs to survive process restarts. Keyed by the caller (e.g.
 # f"{strategy_label}:last_heartbeat_at") so concurrent shadow runs don't
 # clobber each other's schedule.
+# Every rebalance a fraction-of-capital paper bot (bot/shadow/exposure_runner.py)
+# makes: from/to weight, the price it happened at and paper equity after
+# costs. The exposure equivalent of paper_trades, for strategies that hold
+# a changing fraction of capital rather than discrete positions.
+CREATE_EXPOSURE_REBALANCES_TABLE = """
+CREATE TABLE IF NOT EXISTS exposure_rebalances (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    exchange TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    timeframe TEXT NOT NULL,
+    strategy_label TEXT NOT NULL,
+    bar_time INTEGER NOT NULL,
+    price REAL NOT NULL,
+    from_weight REAL NOT NULL,
+    to_weight REAL NOT NULL,
+    equity REAL NOT NULL
+)
+"""
+
 CREATE_BOT_STATE_TABLE = """
 CREATE TABLE IF NOT EXISTS bot_state (
     key TEXT PRIMARY KEY,
@@ -188,6 +207,7 @@ def connect(db_path: str = "data/trades.db") -> sqlite3.Connection:
     conn.execute(CREATE_FEAR_GREED_TABLE)
     conn.execute(CREATE_EXPERIMENTS_TABLE)
     conn.execute(CREATE_BOT_STATE_TABLE)
+    conn.execute(CREATE_EXPOSURE_REBALANCES_TABLE)
     conn.commit()
     return conn
 
@@ -507,6 +527,44 @@ def sum_paper_trade_pnl_pct(
         WHERE exchange = ? AND symbol = ? AND timeframe = ? AND strategy_label = ?
         """,
         (exchange, symbol, timeframe, strategy_label),
+    )
+    return cur.fetchone()[0]
+
+
+def record_exposure_rebalance(
+    conn: sqlite3.Connection,
+    exchange: str,
+    symbol: str,
+    timeframe: str,
+    strategy_label: str,
+    bar_time,
+    price: float,
+    from_weight: float,
+    to_weight: float,
+    equity: float,
+) -> None:
+    """Doesn't commit: the caller commits it together with the bot's state
+    update (set_state), so a crash can never record a rebalance without
+    also advancing the state past that bar, or vice versa."""
+    conn.execute(
+        """
+        INSERT INTO exposure_rebalances
+            (exchange, symbol, timeframe, strategy_label, bar_time, price, from_weight, to_weight, equity)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (exchange, symbol, timeframe, strategy_label, _to_epoch_ms(bar_time), price, from_weight, to_weight, equity),
+    )
+
+
+def count_exposure_rebalances(
+    conn: sqlite3.Connection, exchange: str, symbol: str, timeframe: str, strategy_label: str, since_ms: int = 0
+) -> int:
+    cur = conn.execute(
+        """
+        SELECT COUNT(*) FROM exposure_rebalances
+        WHERE exchange = ? AND symbol = ? AND timeframe = ? AND strategy_label = ? AND bar_time >= ?
+        """,
+        (exchange, symbol, timeframe, strategy_label, since_ms),
     )
     return cur.fetchone()[0]
 

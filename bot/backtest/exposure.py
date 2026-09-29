@@ -4,6 +4,33 @@ from bot.backtest.engine import BacktestResult, Trade
 from bot.strategy.base import Strategy
 
 
+def mark_to_market(held: float, equity: float, prev_close: float, close: float) -> tuple[float, float]:
+    """Apply one bar's price move to a position holding fraction `held` of
+    `equity`. Returns (new_held, new_equity): the held fraction drifts,
+    since the invested part grew or shrank relative to the cash part."""
+    if held <= 0:
+        return 0.0, equity
+    r = close / prev_close - 1
+    growth = 1 + held * r
+    if growth <= 0:
+        return 0.0, 0.0
+    return held * (1 + r) / growth, equity * growth
+
+
+def rebalance(held: float, equity: float, want: float, threshold: float, cost_rate: float) -> tuple[float, float, bool]:
+    """Move from `held` to target `want` at the bar's close, paying
+    `cost_rate` on the traded notional. Changes smaller than `threshold`
+    are skipped, except going fully flat, which always executes. Returns
+    (new_held, new_equity, traded).
+
+    Public, together with mark_to_market: the live exposure paper bot
+    (bot/shadow/exposure_runner.py) calls these same two functions bar by
+    bar, so live and backtest math can't drift apart."""
+    if abs(want - held) > threshold or (want == 0.0 and held > 0.0):
+        return want, equity - equity * abs(want - held) * cost_rate, True
+    return held, equity, False
+
+
 def run_exposure_backtest(
     df: pd.DataFrame,
     strategy: Strategy,
@@ -44,18 +71,14 @@ def run_exposure_backtest(
     episode: dict | None = None
 
     for i, ts in enumerate(df.index):
-        if i > 0 and held > 0:
-            r = close[i] / close[i - 1] - 1
-            growth = 1 + held * r
-            equity *= growth
-            held = held * (1 + r) / growth if growth > 0 else 0.0
+        if i > 0:
+            held, equity = mark_to_market(held, equity, close[i - 1], close[i])
 
         want = float(target.iloc[i])
-        if abs(want - held) > threshold or (want == 0.0 and held > 0.0):
-            if held == 0.0 and want > 0.0:
-                episode = {"start": ts, "entry_price": close[i], "equity_before": equity, "peak": want}
-            equity -= equity * abs(want - held) * cost_rate
-            held = want
+        was_flat, equity_before = held == 0.0, equity
+        held, equity, traded = rebalance(held, equity, want, threshold, cost_rate)
+        if traded and was_flat and held > 0.0:
+            episode = {"start": ts, "entry_price": close[i], "equity_before": equity_before, "peak": held}
         if episode is not None:
             episode["peak"] = max(episode["peak"], held)
             if held == 0.0:

@@ -27,6 +27,7 @@ from bot.research.lifecycle import (
     list_lifecycle_stages,
     set_lifecycle_stage,
 )
+from bot.shadow.exposure_runner import run_exposure_shadow_loop
 from bot.shadow.runner import drop_incomplete_bar, run_shadow_loop
 from bot.storage.db import (
     connect,
@@ -632,6 +633,13 @@ def main() -> None:
         help="identifies this run's paper-trading state (DB rows, Telegram messages) so concurrent "
         "shadow runs don't collide; defaults to --strategy's name",
     )
+    shadow_parser.add_argument(
+        "--param",
+        action="append",
+        default=[],
+        help="repeatable single-value config override, same section.key=value syntax as sweep, "
+        "e.g. --param donchian_ensemble.bars_per_day=6",
+    )
     _add_strategy_override_args(shadow_parser)
 
     diagnose_parser = subparsers.add_parser(
@@ -970,6 +978,10 @@ def main() -> None:
         timeframe = args.timeframe or config["poll"]["timeframe"]
         interval = args.interval or config["poll"]["interval_seconds"]
         strategy_config = _apply_strategy_overrides(config.get("strategy", {}), vars(args))
+        for section, key, values in (parse_param_arg(p) for p in args.param):
+            if len(values) != 1:
+                parser.error(f"shadow --param takes one value, got {section}.{key}={values}")
+            strategy_config = _with_override(strategy_config, section, key, values[0])
         backtest_config = config.get("backtest", {})
         alerting_config = config.get("alerting", {})
         strategy_label = args.strategy_label or args.strategy
@@ -986,8 +998,6 @@ def main() -> None:
         strategy = _build_strategy(
             args.strategy, strategy_config, funding_df=funding_df, funding_refresh_fn=funding_refresh_fn
         )
-        if hasattr(strategy, "target_weights"):
-            parser.error(f"{args.strategy} sizes as a fraction of capital; shadow runs don't support that yet")
 
         alerter = TelegramAlerter(
             os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
@@ -998,7 +1008,10 @@ def main() -> None:
                 "shadow run continues, but alerts will only be logged, not sent"
             )
 
-        run_shadow_loop(
+        # fraction-of-capital strategies (donchian_ensemble) have their own
+        # paper loop; everything else holds discrete positions with stops
+        loop = run_exposure_shadow_loop if hasattr(strategy, "target_weights") else run_shadow_loop
+        loop(
             exchange, conn, alerter, exchange_id, symbol, timeframe, strategy, strategy_label,
             fee=backtest_config.get("fee", 0.001),
             slippage=backtest_config.get("slippage", 0.0005),

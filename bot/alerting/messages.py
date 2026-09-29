@@ -314,3 +314,79 @@ def format_research_report(header: dict, runs: list[tuple[str, dict | None, dict
     if len(messages) > 1:
         messages = [f"{m}\n(part {i}/{len(messages)})" for i, m in enumerate(messages, 1)]
     return messages
+
+
+def format_exposure_rebalance(
+    symbol: str,
+    timeframe: str,
+    strategy_label: str,
+    from_weight: float,
+    to_weight: float,
+    price: float,
+    bar_time,
+    paper_equity: float,
+    diagnosis: dict | None = None,
+) -> str:
+    """A fraction-of-capital strategy (e.g. donchian_ensemble) changed how
+    much of the account it holds. Phrased as a percentage of capital so it
+    maps straight onto a manual MT5 position size."""
+    change = to_weight - from_weight
+    if to_weight == 0:
+        action = f"Close the {symbol} position (was {from_weight:.0%} of capital)"
+    elif from_weight == 0:
+        action = f"Open a {symbol} long worth {to_weight:.0%} of your trading capital"
+    else:
+        verb = "Add to" if change > 0 else "Reduce"
+        action = (
+            f"{verb} the {symbol} long: {from_weight:.0%} → {to_weight:.0%} of capital "
+            f"({'buy' if change > 0 else 'sell'} {abs(change):.0%} of capital)"
+        )
+    fields = {
+        "strategy": strategy_label,
+        "action": action,
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "from_weight_pct": f"{from_weight * 100:.1f}",
+        "to_weight_pct": f"{to_weight * 100:.1f}",
+        "price": f"{price:.2f}",
+        "time": _fmt_time(bar_time),
+        "paper_equity": f"{paper_equity:.2f}",
+    }
+    for key, value in (diagnosis or {}).items():
+        if key in ("near_miss", "near_miss_key", "near_miss_reason"):
+            continue
+        fields[f"diag_{key}"] = value
+    fields["note"] = "paper trading — no order placed"
+    return _kv_lines("EXPOSURE_REBALANCE", fields)
+
+
+def format_exposure_summary(
+    symbol: str,
+    timeframe: str,
+    strategy_label: str,
+    held: float,
+    paper_equity: float,
+    start_equity: float,
+    started_at,
+    rebalances_all_time: int,
+    diagnosis: dict | None = None,
+) -> str:
+    ret = (paper_equity / start_equity - 1) * 100 if start_equity else 0.0
+    summary = (
+        f"Holding {held:.0%} of capital in {symbol}. " if held > 0 else f"Flat, no {symbol} held. "
+    ) + f"Paper account {paper_equity:,.2f} ({ret:+.2f}% since {_fmt_time(started_at)}), {rebalances_all_time} rebalances so far."
+    fields = {
+        "strategy": strategy_label,
+        "summary": summary,
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "weight_pct": f"{held * 100:.1f}",
+        "paper_equity": f"{paper_equity:.2f}",
+        "return_pct": f"{ret:.2f}",
+        "rebalances_all_time": rebalances_all_time,
+    }
+    for key, value in (diagnosis or {}).items():
+        if key in ("near_miss", "near_miss_key", "near_miss_reason"):
+            continue
+        fields[f"diag_{key}"] = value
+    return _kv_lines("DAILY_SUMMARY", fields)

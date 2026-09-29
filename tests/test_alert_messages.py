@@ -231,3 +231,28 @@ def test_research_report_splits_long_batches_under_telegram_limit():
     assert messages[0].endswith(f"(part 1/{len(messages)})")
     assert sum(m.count("[crt variant") for m in messages) == 60
     assert TELEGRAM_MAX_CHARS < 4096
+
+
+def test_exposure_rebalance_actions_read_as_mt5_instructions():
+    from bot.alerting.messages import format_exposure_rebalance
+
+    open_msg = format_exposure_rebalance("BTC/USDT", "4h", "ens", 0.0, 0.38, 84000.0, 1790035200000, 10000.0)
+    assert "action=Open a BTC/USDT long worth 38% of your trading capital" in open_msg.splitlines()
+    assert "time=2026-09-22" in open_msg.splitlines()
+    add = format_exposure_rebalance("BTC/USDT", "4h", "ens", 0.30, 0.42, 84000.0, 1790035200000, 10000.0)
+    assert "action=Add to the BTC/USDT long: 30% → 42% of capital (buy 12% of capital)" in add.splitlines()
+    cut = format_exposure_rebalance("BTC/USDT", "4h", "ens", 0.42, 0.25, 84000.0, 1790035200000, 10000.0)
+    assert "action=Reduce the BTC/USDT long: 42% → 25% of capital (sell 17% of capital)" in cut.splitlines()
+    close = format_exposure_rebalance("BTC/USDT", "4h", "ens", 0.25, 0.0, 84000.0, 1790035200000, 10000.0)
+    assert "action=Close the BTC/USDT position (was 25% of capital)" in close.splitlines()
+    assert close.splitlines()[-1] == "note=paper trading — no order placed"
+
+
+def test_exposure_summary_line():
+    from bot.alerting.messages import format_exposure_summary
+
+    msg = format_exposure_summary("BTC/USDT", "4h", "ens", 0.4, 10500.0, 10000.0, 1790035200000, 3)
+    assert (
+        "summary=Holding 40% of capital in BTC/USDT. Paper account 10,500.00 (+5.00% since 2026-09-22), "
+        "3 rebalances so far." in msg.splitlines()
+    )
