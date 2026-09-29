@@ -16,6 +16,7 @@ from bot.alerting.telegram import TelegramAlerter
 from bot.backtest.engine import check_exit, close_position, open_position
 from bot.data.backfill import backfill_candles
 from bot.data.sentiment import fetch_fear_greed_index
+from bot.shadow.exposure_runner import maybe_send_exposure_summary, process_exposure_bars
 from bot.shadow.runner import (
     drop_incomplete_bar,
     maybe_send_daily_summary,
@@ -141,6 +142,10 @@ def _process_one_strategy(
             maybe_send_near_miss_alert(conn, alerter, symbol, timeframe, reco_label, strategy, df)
 
 
+def _is_exposure(strategy: Strategy) -> bool:
+    return hasattr(strategy, "target_weights")
+
+
 def recommend_poll_once(
     exchange: ccxt.Exchange,
     conn: sqlite3.Connection,
@@ -169,14 +174,22 @@ def recommend_poll_once(
     backfill_candles(exchange, conn, exchange_id, symbol, timeframe, backfill_start_date, resume=True)
     fear_greed = maybe_refresh_fear_greed(conn)
 
-    max_lookback = max((strategy.min_lookback for _, strategy in strategies), default=0)
-    df = query_candles_df(conn, exchange_id, symbol, timeframe).tail(
-        max(history_bars, max_lookback + 5)
-    )
-    df = drop_incomplete_bar(df, timeframe)
+    position_strategies = [s for _, s in strategies if not _is_exposure(s)]
+    max_lookback = max((s.min_lookback for s in position_strategies), default=0)
+    full_df = drop_incomplete_bar(query_candles_df(conn, exchange_id, symbol, timeframe), timeframe)
+    df = full_df.tail(max(history_bars, max_lookback + 5))
 
     for label, strategy in strategies:
         try:
+            if _is_exposure(strategy):
+                # fraction-of-capital strategies need the full history
+                # (see bot/shadow/exposure_runner.py) and resize rather
+                # than open/stop/exit
+                process_exposure_bars(
+                    conn, alerter, exchange_id, symbol, timeframe, strategy, f"reco_{label}", full_df,
+                    fee, slippage, advisory=True,
+                )
+                continue
             _process_one_strategy(
                 conn, alerter, exchange_id, symbol, timeframe, label, strategy, df,
                 fee, slippage, fear_greed,
@@ -217,9 +230,8 @@ def run_recommend_loop(
             )
             for label, strategy in strategies:
                 reco_label = f"reco_{label}"
-                maybe_send_daily_summary(
-                    conn, alerter, exchange_id, symbol, timeframe, reco_label, strategy
-                )
+                summary_fn = maybe_send_exposure_summary if _is_exposure(strategy) else maybe_send_daily_summary
+                summary_fn(conn, alerter, exchange_id, symbol, timeframe, reco_label, strategy)
                 maybe_send_heartbeat(
                     conn, alerter, symbol, timeframe, reco_label, heartbeat_interval_seconds
                 )

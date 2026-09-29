@@ -1,0 +1,102 @@
+name: Research Report
+
+# Manual button (Actions tab -> Research Report -> Run workflow): backfills
+# candles on the VPS, backtests a strategy on the train/test windows plus a
+# baseline, and sends the results to Telegram as one copy-pasteable
+# RESEARCH_REPORT message. Runs inside the already-deployed image, so the
+# strategy being tested must already be merged to master and deployed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      strategy:
+        description: "Strategy to test, or a comma-separated list run one after another (e.g. crt or vol_expansion,ema_cross)"
+        default: "crt"
+        required: true
+      symbol:
+        description: "Pair to test (BTC/USDT, ETH/USDT, SOL/USDT...)"
+        default: "BTC/USDT"
+        required: true
+      timeframe:
+        description: "Candle timeframe (1d, 4h, 1h)"
+        default: "1d"
+        required: true
+      params:
+        description: "Variants to compare, e.g. --param crt.target=range,rr (blank = config defaults only)"
+        default: ""
+        required: false
+      baseline:
+        description: "Baseline strategy on the same windows, or 'none'"
+        default: "donchian"
+        required: true
+      holdout:
+        description: "The one deliberate check on the reserved holdout window (pre-register it in notes/holdout_validations.md first)"
+        type: choice
+        options: ["no", "yes"]
+        default: "no"
+
+env:
+  DEPLOY_PATH: /opt/btc-trade-bot
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      # inputs end up in a remote shell command — only allow the characters
+      # the CLI arguments legitimately need
+      - name: Validate inputs
+        env:
+          STRATEGY: ${{ inputs.strategy }}
+          SYMBOL: ${{ inputs.symbol }}
+          TIMEFRAME: ${{ inputs.timeframe }}
+          PARAMS: ${{ inputs.params }}
+          BASELINE: ${{ inputs.baseline }}
+          HOLDOUT: ${{ inputs.holdout }}
+        run: |
+          [[ "$STRATEGY" =~ ^[a-z_]+(,[a-z_]+)*$ ]] || { echo "bad strategy"; exit 1; }
+          # --param sections are per-strategy, so they can't be shared across a list
+          if [[ "$STRATEGY" == *,* && -n "$PARAMS" ]]; then echo "params only work with a single strategy"; exit 1; fi
+          [[ "$SYMBOL" =~ ^[A-Z0-9]+/[A-Z0-9]+$ ]] || { echo "bad symbol"; exit 1; }
+          [[ "$TIMEFRAME" =~ ^[0-9]+[mhdw]$ ]] || { echo "bad timeframe"; exit 1; }
+          [[ "$BASELINE" =~ ^[a-z_]+$ ]] || { echo "bad baseline"; exit 1; }
+          [[ "$PARAMS" =~ ^[-a-zA-Z0-9_.,=\ ]*$ ]] || { echo "bad params"; exit 1; }
+          [[ "$HOLDOUT" == "no" || "$HOLDOUT" == "yes" ]] || { echo "bad holdout"; exit 1; }
+          if [[ "$HOLDOUT" == "yes" && "$STRATEGY" == *,* ]]; then echo "holdout checks one strategy at a time"; exit 1; fi
+
+      - name: Run report on server
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          STRATEGY: ${{ inputs.strategy }}
+          SYMBOL: ${{ inputs.symbol }}
+          TIMEFRAME: ${{ inputs.timeframe }}
+          PARAMS: ${{ inputs.params }}
+          BASELINE: ${{ inputs.baseline }}
+          HOLDOUT: ${{ inputs.holdout }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: STRATEGY,SYMBOL,TIMEFRAME,PARAMS,BASELINE,HOLDOUT
+          command_timeout: 60m
+          script: |
+            set -e
+            cd ${{ env.DEPLOY_PATH }}
+            # --no-resume: re-fetch full history (idempotent upsert), so a
+            # timeframe the live poller only ever seeded recently still gets
+            # its whole train window. From 2018, not 2020: the train window
+            # still starts 2020-01-01, but long-lookback strategies
+            # (donchian_ensemble's 360-day model) need a warmup year before it.
+            docker compose run --rm trade-bot python main.py backfill \
+              --symbol "$SYMBOL" --timeframe "$TIMEFRAME" --start 2018-01-01T00:00:00Z --no-resume
+            # sequential on purpose: one SQLite writer at a time alongside the
+            # live shadow runs. One strategy failing doesn't stop the rest.
+            extra=""
+            if [ "$HOLDOUT" = "yes" ]; then extra="--holdout"; fi
+            failed=""
+            for s in $(echo "$STRATEGY" | tr "," " "); do
+              echo "==> research-report $s"
+              docker compose run --rm trade-bot python main.py research-report \
+                --strategy "$s" --symbol "$SYMBOL" --timeframe "$TIMEFRAME" --baseline "$BASELINE" $PARAMS $extra \
+                || failed="$failed $s"
+            done
+            if [ -n "$failed" ]; then echo "FAILED:$failed"; exit 1; fi

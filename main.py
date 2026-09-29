@@ -9,8 +9,10 @@ from pathlib import Path
 
 import pandas as pd
 
+from bot.alerting.messages import format_research_report
 from bot.alerting.telegram import TelegramAlerter
 from bot.backtest.engine import run_backtest
+from bot.backtest.exposure import run_exposure_backtest
 from bot.backtest.metrics import breakdown_by_strategy, summarize
 from bot.config import load_config
 from bot.data.backfill import backfill_candles
@@ -25,6 +27,7 @@ from bot.research.lifecycle import (
     list_lifecycle_stages,
     set_lifecycle_stage,
 )
+from bot.shadow.exposure_runner import run_exposure_shadow_loop
 from bot.shadow.runner import drop_incomplete_bar, run_shadow_loop
 from bot.storage.db import (
     connect,
@@ -35,7 +38,9 @@ from bot.storage.db import (
     record_experiment,
     set_experiment_decision,
 )
+from bot.strategy.crt import CandleRangeTheoryStrategy
 from bot.strategy.donchian import DonchianBreakoutStrategy
+from bot.strategy.donchian_ensemble import DonchianEnsembleStrategy
 from bot.strategy.ema_cross import EmaCrossStrategy
 from bot.strategy.flat import FlatStrategy
 from bot.strategy.funding_filter import FundingFilteredStrategy
@@ -51,7 +56,7 @@ logger = logging.getLogger(__name__)
 
 STRATEGY_CHOICES = [
     "ema_cross", "rsi_bb", "donchian", "market_structure", "multi_timeframe", "vol_expansion",
-    "funding_filtered", "regime_switched",
+    "funding_filtered", "regime_switched", "crt", "donchian_ensemble",
 ]
 TREND_STRATEGY_CHOICES = [
     "ema_cross", "donchian", "market_structure", "multi_timeframe", "vol_expansion",
@@ -244,16 +249,34 @@ def _run_backtest_once(
     backtest_config: dict,
     timeframe: str,
     funding_df: pd.DataFrame | None = None,
+    warmup_df: pd.DataFrame | None = None,
 ) -> dict:
+    """`warmup_df`: longer history ending where `df` ends, used only by
+    exposure strategies (fraction-of-capital sizing, e.g. donchian_ensemble)
+    to compute targets before the window starts — their longest lookback is
+    a year, which would otherwise sit idle through the first year of `df`."""
     strategy = _build_strategy(strategy_name, strategy_config, funding_df=funding_df)
-    result = run_backtest(
-        df,
-        strategy,
-        fee=backtest_config.get("fee", 0.001),
-        slippage=backtest_config.get("slippage", 0.0005),
-        initial_capital=backtest_config.get("initial_capital", 10_000.0),
-        risk_pct=backtest_config.get("risk_pct", 0.01),
-    )
+    if hasattr(strategy, "target_weights"):
+        weights = None
+        if warmup_df is not None and len(warmup_df):
+            weights = strategy.target_weights(warmup_df).reindex(df.index)
+        result = run_exposure_backtest(
+            df,
+            strategy,
+            fee=backtest_config.get("fee", 0.001),
+            slippage=backtest_config.get("slippage", 0.0005),
+            initial_capital=backtest_config.get("initial_capital", 10_000.0),
+            weights=weights,
+        )
+    else:
+        result = run_backtest(
+            df,
+            strategy,
+            fee=backtest_config.get("fee", 0.001),
+            slippage=backtest_config.get("slippage", 0.0005),
+            initial_capital=backtest_config.get("initial_capital", 10_000.0),
+            risk_pct=backtest_config.get("risk_pct", 0.01),
+        )
     summary = summarize(
         result.trades,
         result.equity_curve,
@@ -326,6 +349,10 @@ def _record_experiment(
         logger.exception("failed to record experiment — continuing, this is diagnostic only")
 
 
+def _fmt_date(ts) -> str:
+    return pd.Timestamp(ts).strftime("%Y-%m-%d")
+
+
 HOLDOUT_LOG_PATH = Path("notes/holdout_validations.md")
 
 
@@ -389,6 +416,10 @@ def _build_strategy(
         return MultiTimeframeTrendPullbackStrategy(strategy_config.get("multi_timeframe", {}))
     if name == "vol_expansion":
         return VolatilityExpansionBreakoutStrategy(strategy_config.get("vol_expansion", {}))
+    if name == "crt":
+        return CandleRangeTheoryStrategy(strategy_config.get("crt", {}))
+    if name == "donchian_ensemble":
+        return DonchianEnsembleStrategy(strategy_config.get("donchian_ensemble", {}))
     if name == "funding_filtered":
         # base_strategy/high_threshold/low_threshold are config-driven (same
         # pattern as regime_switched's trend_strategy), not separate
@@ -602,6 +633,13 @@ def main() -> None:
         help="identifies this run's paper-trading state (DB rows, Telegram messages) so concurrent "
         "shadow runs don't collide; defaults to --strategy's name",
     )
+    shadow_parser.add_argument(
+        "--param",
+        action="append",
+        default=[],
+        help="repeatable single-value config override, same section.key=value syntax as sweep, "
+        "e.g. --param donchian_ensemble.bars_per_day=6",
+    )
     _add_strategy_override_args(shadow_parser)
 
     diagnose_parser = subparsers.add_parser(
@@ -630,6 +668,47 @@ def main() -> None:
     recommend_parser.add_argument("--symbol", default=None)
     recommend_parser.add_argument("--timeframe", default=None)
     recommend_parser.add_argument("--interval", type=int, default=None, help="seconds between checks")
+
+    research_parser = subparsers.add_parser(
+        "research-report",
+        help="Backtest a strategy on the train and test windows (plus a baseline) and send the "
+        "results to Telegram in a copy-paste-friendly format",
+    )
+    research_parser.add_argument("--strategy", choices=STRATEGY_CHOICES, required=True)
+    research_parser.add_argument(
+        "--symbol", default=None, help="e.g. ETH/USDT for a cross-asset check (defaults to exchange.symbol)"
+    )
+    research_parser.add_argument("--timeframe", default="1d")
+    research_parser.add_argument(
+        "--param",
+        action="append",
+        default=[],
+        help="repeatable, same syntax as sweep — every combination is reported as its own variant, "
+        "e.g. --param crt.target=range,rr --param crt.trend_ema_period=0,50",
+    )
+    research_parser.add_argument(
+        "--baseline",
+        default="donchian",
+        help="strategy run on the same windows for comparison (config defaults), or 'none'",
+    )
+    research_parser.add_argument("--train-start", default="2020-01-01")
+    research_parser.add_argument("--train-end", default="2023-12-31")
+    research_parser.add_argument(
+        "--test-start",
+        default="2024-01-01",
+        help="test window runs from here up to validation.holdout_start (never into the holdout)",
+    )
+    research_parser.add_argument(
+        "--no-telegram", action="store_true", help="print the report only, don't send it"
+    )
+    research_parser.add_argument(
+        "--holdout",
+        action="store_true",
+        help="the one deliberate check on the reserved holdout window (validation.holdout_start "
+        "onward) instead of train/test: exactly one configuration (no variant grid), logged as "
+        "having touched the holdout. Pre-register the config and pass criteria in "
+        "notes/holdout_validations.md first.",
+    )
 
     experiments_parser = subparsers.add_parser(
         "experiments",
@@ -815,10 +894,154 @@ def main() -> None:
         for params_label, summary in rows:
             print(f"{params_label} -> {summary}")
 
+    elif args.command == "research-report":
+        all_df = query_candles_df(conn, exchange_id, symbol, args.timeframe)
+        holdout_start = config.get("validation", {}).get("holdout_start")
+        if args.holdout and not holdout_start:
+            parser.error("--holdout needs validation.holdout_start set in config.yaml")
+        # routine reports never touch the holdout; --holdout is the one
+        # deliberate exception, and only then is the window included
+        all_df, touched_holdout = apply_holdout_guard(
+            all_df, holdout_start, allow_holdout=args.holdout,
+            context_label=f"research-report {args.strategy}",
+        )
+        train_df = all_df[
+            (all_df.index >= pd.Timestamp(args.train_start, tz="UTC"))
+            & (all_df.index <= pd.Timestamp(args.train_end, tz="UTC"))
+        ]
+        test_df = all_df[all_df.index >= pd.Timestamp(args.test_start, tz="UTC")]
+        base_strategy_config = config.get("strategy", {})
+        backtest_config = config.get("backtest", {})
+
+        def run_window(name: str, strategy_config: dict, window_df: pd.DataFrame) -> dict | None:
+            if len(window_df) == 0:
+                return None
+            funding_df = _load_funding_df(config, conn) if name == "funding_filtered" else None
+            warmup_df = all_df[all_df.index <= window_df.index.max()]
+            summary = _run_backtest_once(
+                window_df, name, strategy_config, backtest_config, args.timeframe, funding_df,
+                warmup_df=warmup_df,
+            )
+            _record_experiment(
+                conn, "holdout_check" if args.holdout else "research_report", name, name, symbol,
+                args.timeframe, window_df, touched_holdout=args.holdout,
+                strategy_config=strategy_config, summary=summary,
+            )
+            return summary
+
+        grid = [parse_param_arg(p) for p in args.param]
+        # a --param for another strategy's section silently changes nothing,
+        # producing N identical "variants" — refuse instead. Wrapper
+        # strategies legitimately configure other sections, so skip them.
+        if args.strategy not in ("regime_switched", "funding_filtered"):
+            foreign = sorted({section for section, _, _ in grid if section != args.strategy})
+            if foreign:
+                parser.error(
+                    f"--param section(s) {', '.join(foreign)} don't apply to --strategy {args.strategy}"
+                )
+        sections_keys = [(section, key) for section, key, _ in grid]
+        combos = list(itertools.product(*[values for _, _, values in grid])) if grid else [()]
+        if args.holdout and len(combos) > 1:
+            # comparing variants on the holdout and keeping the best is
+            # exactly the selection the reserved window exists to prevent
+            parser.error("--holdout checks exactly one configuration: give each --param a single value")
+
+        if args.holdout:
+            holdout_df = all_df[all_df.index >= pd.Timestamp(holdout_start, tz="UTC")]
+            if len(holdout_df) == 0:
+                parser.error(f"no candles from {holdout_start} onward — backfill first")
+            strategy_config = base_strategy_config
+            for (section, key), value in zip(sections_keys, combos[0]):
+                strategy_config = _with_override(strategy_config, section, key, value)
+            params_label = ", ".join(f"{k}={v}" for (_, k), v in zip(sections_keys, combos[0]))
+            runs = [(
+                f"{args.strategy} {params_label}" if params_label else f"{args.strategy} (defaults)",
+                [("holdout", run_window(args.strategy, strategy_config, holdout_df))],
+            )]
+            if args.baseline != "none":
+                runs.append((
+                    f"baseline: {args.baseline}",
+                    [("holdout", run_window(args.baseline, base_strategy_config, holdout_df))],
+                ))
+            header = {
+                "check": "HOLDOUT — one deliberate look, see notes/holdout_validations.md",
+                "strategy": args.strategy,
+                "symbol": symbol,
+                "timeframe": args.timeframe,
+                "holdout": f"{_fmt_date(holdout_df.index.min())}..{_fmt_date(holdout_df.index.max())} ({len(holdout_df)} bars)",
+                "costs": (
+                    f"fee={backtest_config.get('fee', 0.001)} slippage={backtest_config.get('slippage', 0.0005)} "
+                    f"risk/trade={backtest_config.get('risk_pct', 0.01) * 100:g}%"
+                ),
+            }
+            messages = format_research_report(header, runs, title="HOLDOUT_CHECK")
+            for message in messages:
+                print(message)
+                print()
+            if touched_holdout:
+                log_holdout_validation(
+                    args.strategy, symbol, args.timeframe, holdout_start, None,
+                    {label: windows[0][1] for label, windows in runs},
+                )
+            if not args.no_telegram:
+                alerter = TelegramAlerter(os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID"))
+                for message in messages:
+                    alerter.send(message)
+            return
+
+        runs = []
+        for combo in combos:
+            strategy_config = base_strategy_config
+            for (section, key), value in zip(sections_keys, combo):
+                strategy_config = _with_override(strategy_config, section, key, value)
+            params_label = ", ".join(f"{k}={v}" for (_, k), v in zip(sections_keys, combo))
+            label = f"{args.strategy} {params_label}" if params_label else f"{args.strategy} (defaults)"
+            runs.append((
+                label,
+                run_window(args.strategy, strategy_config, train_df),
+                run_window(args.strategy, strategy_config, test_df),
+            ))
+        if args.baseline != "none":
+            runs.append((
+                f"baseline: {args.baseline}",
+                run_window(args.baseline, base_strategy_config, train_df),
+                run_window(args.baseline, base_strategy_config, test_df),
+            ))
+
+        def span(window_df: pd.DataFrame) -> str:
+            if len(window_df) == 0:
+                return "EMPTY — backfill needed"
+            return f"{_fmt_date(window_df.index.min())}..{_fmt_date(window_df.index.max())} ({len(window_df)} bars)"
+
+        header = {
+            "strategy": args.strategy,
+            "symbol": symbol,
+            "timeframe": args.timeframe,
+            "train": span(train_df),
+            "test": span(test_df),
+            "holdout": f"excluded from {holdout_start}" if holdout_start else "none configured",
+            "costs": (
+                f"fee={backtest_config.get('fee', 0.001)} slippage={backtest_config.get('slippage', 0.0005)} "
+                f"risk/trade={backtest_config.get('risk_pct', 0.01) * 100:g}%"
+            ),
+        }
+        messages = format_research_report(header, runs)
+        for message in messages:
+            print(message)
+            print()
+        if not args.no_telegram:
+            alerter = TelegramAlerter(os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID"))
+            for message in messages:
+                alerter.send(message)
+
     elif args.command == "shadow":
         timeframe = args.timeframe or config["poll"]["timeframe"]
         interval = args.interval or config["poll"]["interval_seconds"]
         strategy_config = _apply_strategy_overrides(config.get("strategy", {}), vars(args))
+        for section, key, values in (parse_param_arg(p) for p in args.param):
+            if len(values) != 1:
+                parser.error(f"shadow --param takes one value, got {section}.{key}={values}")
+            strategy_config = _with_override(strategy_config, section, key, values[0])
         backtest_config = config.get("backtest", {})
         alerting_config = config.get("alerting", {})
         strategy_label = args.strategy_label or args.strategy
@@ -845,7 +1068,10 @@ def main() -> None:
                 "shadow run continues, but alerts will only be logged, not sent"
             )
 
-        run_shadow_loop(
+        # fraction-of-capital strategies (donchian_ensemble) have their own
+        # paper loop; everything else holds discrete positions with stops
+        loop = run_exposure_shadow_loop if hasattr(strategy, "target_weights") else run_shadow_loop
+        loop(
             exchange, conn, alerter, exchange_id, symbol, timeframe, strategy, strategy_label,
             fee=backtest_config.get("fee", 0.001),
             slippage=backtest_config.get("slippage", 0.0005),
@@ -898,11 +1124,21 @@ def main() -> None:
         slippage = recommend_config.get("slippage", 0.0003)
         alerting_config = config.get("alerting", {})
 
+        # one recommend process per timeframe: an entry's optional
+        # `timeframe` (default: the process's own) decides which process
+        # evaluates it, since each process polls a single candle series
+        default_timeframe = recommend_config.get("timeframe") or config["poll"]["timeframe"]
         strategies: list[tuple[str, Strategy]] = []
         for entry in recommend_config.get("strategies", []):
+            if entry.get("timeframe", default_timeframe) != timeframe:
+                continue
             label = entry["label"]
             strategy_name = entry["strategy"]
             strategy_config = _apply_strategy_overrides(config.get("strategy", {}), entry)
+            # arbitrary per-entry overrides, e.g. {"donchian_ensemble.bars_per_day": 6}
+            for path, value in (entry.get("params") or {}).items():
+                section, key = path.split(".", 1)
+                strategy_config = _with_override(strategy_config, section, key, value)
 
             funding_df = None
             funding_refresh_fn = None
@@ -914,6 +1150,9 @@ def main() -> None:
                 strategy_name, strategy_config, funding_df=funding_df, funding_refresh_fn=funding_refresh_fn
             )
             strategies.append((label, strategy))
+
+        if not strategies:
+            parser.error(f"no recommend.strategies entries for timeframe {timeframe}")
 
         reco_chat_id = os.environ.get("TELEGRAM_RECO_CHAT_ID") or os.environ.get("TELEGRAM_CHAT_ID")
         alerter = TelegramAlerter(os.environ.get("TELEGRAM_BOT_TOKEN"), reco_chat_id)

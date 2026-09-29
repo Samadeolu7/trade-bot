@@ -66,6 +66,19 @@ strategy:
     squeeze_percentile: 0.2   # width at/below this percentile of its own trailing history counts as squeezed
     atr_period: 14            # trailing-stop ATR, same mechanism as the other trend strategies
     atr_mult: 2.0
+  donchian_ensemble:          # Zarattini et al. 2025 — research candidate, untested here (spec Section 7h)
+    lookback_days: [5, 10, 20, 30, 60, 90, 150, 250, 360]
+    bars_per_day: 1           # 1 for 1d candles, 6 for 4h — scales lookbacks and vol window
+    vol_target: 0.25          # annualized volatility the position is sized to
+    vol_window_days: 90       # realized-vol lookback
+    max_weight: 1.0           # max fraction of capital; 1.0 = no leverage
+    rebalance_threshold: 0.0  # skip rebalances smaller than this weight change (0 = rebalance every bar, as in the paper)
+  crt:                        # Candle Range Theory — research candidate, untested (spec Section 7g)
+    target: range             # range = opposite end of the range candle | rr = fixed rr_multiple x risk
+    rr_multiple: 2.0          # target: rr only
+    min_rr: 1.0               # skip setups with less reward:risk than this to the target
+    stop_buffer_pct: 0.0      # extra room past the sweep wick, as a fraction of price
+    trend_ema_period: 0       # 0 = off; else longs only above / shorts only below this EMA ("HTF alignment")
   funding_filtered:
     base_strategy: donchian   # any TREND_STRATEGY_CHOICES entry — the strategy being filtered
     high_threshold: 0.0005    # veto new longs when funding rate exceeds this (crowded-long risk) — untested guess, sweep it
@@ -116,9 +129,22 @@ recommend:
     - label: donchian_natr_regime
       strategy: regime_switched
       regime_type: natr
-    - label: multi_timeframe
-      strategy: multi_timeframe
-    - label: vol_expansion
-      strategy: vol_expansion
     - label: donchian_funding_filtered
       strategy: funding_filtered
+    # an entry with its own timeframe is evaluated by the recommend process
+    # started with that --timeframe (see trade-bot-recommend-4h in
+    # docker-compose.yml), not the default daily one
+    - label: donchian_4h
+      strategy: donchian
+      timeframe: 4h
+    # fraction-of-capital strategy: sends RECOMMENDATION_REBALANCE alerts
+    # (resize your position to X% of capital) instead of entry/stop/exit.
+    # Same settings as the donchian_ensemble_4h paper bot.
+    - label: donchian_ensemble_4h
+      strategy: donchian_ensemble
+      timeframe: 4h
+      params:
+        donchian_ensemble.bars_per_day: 6
+        donchian_ensemble.rebalance_threshold: 0.1
+    # removed 2026-09-29: multi_timeframe and vol_expansion showed no edge in
+    # daily backtests (spec Section 7) — not worth recommending real trades on

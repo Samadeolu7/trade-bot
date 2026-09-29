@@ -15,21 +15,6 @@ services:
       - trade_bot_logs:/app/logs
     command: ["python", "main.py", "shadow", "--strategy", "regime_switched", "--strategy-label", "donchian_adx_control"]
 
-  # Concurrent candidate #2 (roadmap Tier 1): multi-timeframe trend +
-  # pullback. Shares the candle data in trade_bot_data (same exchange/
-  # symbol/timeframe) but keeps fully independent paper-trading state via
-  # its own --strategy-label — no shared capital with the control.
-  trade-bot-multi-timeframe:
-    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
-    container_name: btc_trade_bot_multi_timeframe
-    restart: unless-stopped
-    env_file:
-      - .env
-    volumes:
-      - trade_bot_data:/app/data
-      - trade_bot_logs:/app/logs
-    command: ["python", "main.py", "shadow", "--strategy", "multi_timeframe", "--strategy-label", "multi_timeframe"]
-
   # Concurrent candidate #3: donchian trend gated by the NATR
   # volatility-expansion regime filter instead of ADX.
   trade-bot-natr-regime:
@@ -42,20 +27,6 @@ services:
       - trade_bot_data:/app/data
       - trade_bot_logs:/app/logs
     command: ["python", "main.py", "shadow", "--strategy", "regime_switched", "--strategy-label", "donchian_natr_regime", "--regime-type", "natr"]
-
-  # Concurrent candidate #4: volatility-expansion breakout, standalone (not
-  # behind a regime filter) — a distinct entry hypothesis from donchian's
-  # plain price-channel breakout, see bot/strategy/vol_expansion.py.
-  trade-bot-vol-expansion:
-    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
-    container_name: btc_trade_bot_vol_expansion
-    restart: unless-stopped
-    env_file:
-      - .env
-    volumes:
-      - trade_bot_data:/app/data
-      - trade_bot_logs:/app/logs
-    command: ["python", "main.py", "shadow", "--strategy", "vol_expansion", "--strategy-label", "vol_expansion"]
 
   # Concurrent candidate #5: donchian trend, filtered by Binance perpetual
   # funding-rate extremes (crowded-long/short veto) — see
@@ -72,6 +43,56 @@ services:
       - trade_bot_logs:/app/logs
     command: ["python", "main.py", "shadow", "--strategy", "funding_filtered", "--strategy-label", "donchian_funding_filtered"]
 
+  # Concurrent candidate #6: plain donchian (config's 20/55 channels,
+  # unchanged) on 4h candles instead of 1d. Research reports found it
+  # profitable in both train and test windows on BTC (PF 1.68 / 1.48) and
+  # ETH (PF 1.60 / 1.55) with no 4h-specific tuning — see spec Section 7g.
+  # Standalone (no regime filter), exactly the configuration backtested.
+  trade-bot-donchian-4h:
+    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
+    container_name: btc_trade_bot_donchian_4h
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - trade_bot_data:/app/data
+      - trade_bot_logs:/app/logs
+    command: ["python", "main.py", "shadow", "--strategy", "donchian", "--strategy-label", "donchian_4h", "--timeframe", "4h"]
+
+  # Concurrent candidate #7: the control's exact setup (donchian trend,
+  # flat ranging, ADX regime filter) on 4h instead of 1d, alongside
+  # donchian-4h — does the ADX gate avoid bad 4h trades live? Backtest:
+  # train PF 1.89 / 76 trades, test PF 1.39 / 37 (vs plain donchian's 1.48).
+  # Paper only — not in the recommend feed, since its signals are a subset
+  # of donchian_4h's and would duplicate them.
+  trade-bot-donchian-adx-4h:
+    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
+    container_name: btc_trade_bot_donchian_adx_4h
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - trade_bot_data:/app/data
+      - trade_bot_logs:/app/logs
+    command: ["python", "main.py", "shadow", "--strategy", "regime_switched", "--strategy-label", "donchian_adx_4h", "--timeframe", "4h"]
+
+  # Concurrent candidate #8: Donchian ensemble with vol-targeted sizing
+  # (spec Section 7h) on 4h. Holds a changing fraction of capital rather
+  # than discrete positions, so it runs the exposure paper loop
+  # (bot/shadow/exposure_runner.py) and sends EXPOSURE_REBALANCE alerts.
+  # Rebalances only on a >=10-point weight change, so it's practical to
+  # follow by hand in MT5 (the backtests used every-bar rebalancing).
+  trade-bot-donchian-ensemble-4h:
+    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
+    container_name: btc_trade_bot_donchian_ensemble_4h
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - trade_bot_data:/app/data
+      - trade_bot_logs:/app/logs
+    command: ["python", "main.py", "shadow", "--strategy", "donchian_ensemble", "--strategy-label", "donchian_ensemble_4h", "--timeframe", "4h", "--param", "donchian_ensemble.bars_per_day=6", "--param", "donchian_ensemble.rebalance_threshold=0.1"]
+
   # Advisory recommendation feed for manual trading (MT5/Exness BTCUSD) — a
   # separate product from the shadow-run paper simulations above, never
   # places an order anywhere. One process covers every strategy listed in
@@ -87,6 +108,19 @@ services:
       - trade_bot_data:/app/data
       - trade_bot_logs:/app/logs
     command: ["python", "main.py", "recommend"]
+
+  # Recommend feed for 4h-timeframe entries (config.yaml recommend.strategies
+  # entries with `timeframe: 4h`) — one process per candle series.
+  trade-bot-recommend-4h:
+    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
+    container_name: btc_trade_bot_recommend_4h
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - trade_bot_data:/app/data
+      - trade_bot_logs:/app/logs
+    command: ["python", "main.py", "recommend", "--timeframe", "4h"]
 
 volumes:
   trade_bot_data:

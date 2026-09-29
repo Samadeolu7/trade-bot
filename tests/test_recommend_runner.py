@@ -298,3 +298,38 @@ def test_run_recommend_loop_staggers_startup_and_jitters_interval(tmp_path):
     assert 0 <= startup_sleep <= 300
     for jittered in (first_iteration_sleep, second_iteration_sleep):
         assert 270 <= jittered <= 330
+
+
+def test_exposure_strategy_gets_rebalance_recommendations_alongside_position_strategies(tmp_path):
+    import numpy as np
+
+    from bot.shadow.exposure_runner import load_exposure_state
+    from bot.strategy.donchian_ensemble import DonchianEnsembleStrategy
+
+    conn = make_conn(tmp_path)
+    # a steady uptrend: every model long, so the ensemble opens a position
+    closes = 100 * np.exp(np.linspace(0, 0.6, 60))
+    candles = [[day_ms(60 - i), c, c, c, c, 1.0] for i, c in enumerate(closes)]
+    upsert_candles(conn, "binance", "BTC/USDT", "1d", candles)
+    seed_fresh_fear_greed(conn)
+    alerter = MagicMock()
+    alerter.send.return_value = True
+    ensemble = DonchianEnsembleStrategy({"lookback_days": [5, 10], "vol_window_days": 10})
+    scripted = ScriptedStrategy(signal_to_return=None)
+
+    recommend_poll_once(
+        FakeExchange(pages=[[]]), conn, alerter, "binance", "BTC/USDT", "1d",
+        [("donchian_ensemble_4h", ensemble), ("donchian_adx_control", scripted)],
+        fee=0.0, slippage=0.0003, backfill_start_date="2020-01-01T00:00:00Z",
+    )
+
+    state = load_exposure_state(conn, "reco_donchian_ensemble_4h")
+    assert state is not None and state["held"] > 0
+    messages = [c[0][0] for c in alerter.send.call_args_list]
+    rebalance = [m for m in messages if m.startswith("RECOMMENDATION_REBALANCE")]
+    assert len(rebalance) == 1
+    assert "strategy=reco_donchian_ensemble_4h" in rebalance[0]
+    assert "action=Open a BTC/USDT long worth" in rebalance[0]
+    assert "resize your MT5 position to match" in rebalance[0]
+    # the position-based strategy still ran and stayed flat
+    assert get_open_paper_position(conn, "binance", "BTC/USDT", "1d", "reco_donchian_adx_control") is None
