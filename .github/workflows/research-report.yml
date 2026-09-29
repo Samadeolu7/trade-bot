@@ -22,8 +22,8 @@ on:
         default: "1d"
         required: true
       params:
-        description: "Variants to compare, sweep syntax (blank = config defaults only)"
-        default: "--param crt.target=range,rr --param crt.trend_ema_period=0,50"
+        description: "Variants to compare, e.g. --param crt.target=range,rr (blank = config defaults only)"
+        default: ""
         required: false
       baseline:
         description: "Baseline strategy on the same windows, or 'none'"

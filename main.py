@@ -885,6 +885,15 @@ def main() -> None:
             return summary
 
         grid = [parse_param_arg(p) for p in args.param]
+        # a --param for another strategy's section silently changes nothing,
+        # producing N identical "variants" — refuse instead. Wrapper
+        # strategies legitimately configure other sections, so skip them.
+        if args.strategy not in ("regime_switched", "funding_filtered"):
+            foreign = sorted({section for section, _, _ in grid if section != args.strategy})
+            if foreign:
+                parser.error(
+                    f"--param section(s) {', '.join(foreign)} don't apply to --strategy {args.strategy}"
+                )
         sections_keys = [(section, key) for section, key, _ in grid]
         combos = list(itertools.product(*[values for _, _, values in grid])) if grid else [()]
 
