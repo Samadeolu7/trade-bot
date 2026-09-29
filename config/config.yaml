@@ -122,9 +122,13 @@ recommend:
     - label: donchian_natr_regime
       strategy: regime_switched
       regime_type: natr
-    - label: multi_timeframe
-      strategy: multi_timeframe
-    - label: vol_expansion
-      strategy: vol_expansion
     - label: donchian_funding_filtered
       strategy: funding_filtered
+    # an entry with its own timeframe is evaluated by the recommend process
+    # started with that --timeframe (see trade-bot-recommend-4h in
+    # docker-compose.yml), not the default daily one
+    - label: donchian_4h
+      strategy: donchian
+      timeframe: 4h
+    # removed 2026-09-29: multi_timeframe and vol_expansion showed no edge in
+    # daily backtests (spec Section 7) — not worth recommending real trades on

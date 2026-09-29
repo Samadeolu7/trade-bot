@@ -1025,8 +1025,14 @@ def main() -> None:
         slippage = recommend_config.get("slippage", 0.0003)
         alerting_config = config.get("alerting", {})
 
+        # one recommend process per timeframe: an entry's optional
+        # `timeframe` (default: the process's own) decides which process
+        # evaluates it, since each process polls a single candle series
+        default_timeframe = recommend_config.get("timeframe") or config["poll"]["timeframe"]
         strategies: list[tuple[str, Strategy]] = []
         for entry in recommend_config.get("strategies", []):
+            if entry.get("timeframe", default_timeframe) != timeframe:
+                continue
             label = entry["label"]
             strategy_name = entry["strategy"]
             strategy_config = _apply_strategy_overrides(config.get("strategy", {}), entry)
@@ -1041,6 +1047,9 @@ def main() -> None:
                 strategy_name, strategy_config, funding_df=funding_df, funding_refresh_fn=funding_refresh_fn
             )
             strategies.append((label, strategy))
+
+        if not strategies:
+            parser.error(f"no recommend.strategies entries for timeframe {timeframe}")
 
         reco_chat_id = os.environ.get("TELEGRAM_RECO_CHAT_ID") or os.environ.get("TELEGRAM_CHAT_ID")
         alerter = TelegramAlerter(os.environ.get("TELEGRAM_BOT_TOKEN"), reco_chat_id)

@@ -15,21 +15,6 @@ services:
       - trade_bot_logs:/app/logs
     command: ["python", "main.py", "shadow", "--strategy", "regime_switched", "--strategy-label", "donchian_adx_control"]
 
-  # Concurrent candidate #2 (roadmap Tier 1): multi-timeframe trend +
-  # pullback. Shares the candle data in trade_bot_data (same exchange/
-  # symbol/timeframe) but keeps fully independent paper-trading state via
-  # its own --strategy-label — no shared capital with the control.
-  trade-bot-multi-timeframe:
-    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
-    container_name: btc_trade_bot_multi_timeframe
-    restart: unless-stopped
-    env_file:
-      - .env
-    volumes:
-      - trade_bot_data:/app/data
-      - trade_bot_logs:/app/logs
-    command: ["python", "main.py", "shadow", "--strategy", "multi_timeframe", "--strategy-label", "multi_timeframe"]
-
   # Concurrent candidate #3: donchian trend gated by the NATR
   # volatility-expansion regime filter instead of ADX.
   trade-bot-natr-regime:
@@ -42,20 +27,6 @@ services:
       - trade_bot_data:/app/data
       - trade_bot_logs:/app/logs
     command: ["python", "main.py", "shadow", "--strategy", "regime_switched", "--strategy-label", "donchian_natr_regime", "--regime-type", "natr"]
-
-  # Concurrent candidate #4: volatility-expansion breakout, standalone (not
-  # behind a regime filter) — a distinct entry hypothesis from donchian's
-  # plain price-channel breakout, see bot/strategy/vol_expansion.py.
-  trade-bot-vol-expansion:
-    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
-    container_name: btc_trade_bot_vol_expansion
-    restart: unless-stopped
-    env_file:
-      - .env
-    volumes:
-      - trade_bot_data:/app/data
-      - trade_bot_logs:/app/logs
-    command: ["python", "main.py", "shadow", "--strategy", "vol_expansion", "--strategy-label", "vol_expansion"]
 
   # Concurrent candidate #5: donchian trend, filtered by Binance perpetual
   # funding-rate extremes (crowded-long/short veto) — see
@@ -103,6 +74,19 @@ services:
       - trade_bot_data:/app/data
       - trade_bot_logs:/app/logs
     command: ["python", "main.py", "recommend"]
+
+  # Recommend feed for 4h-timeframe entries (config.yaml recommend.strategies
+  # entries with `timeframe: 4h`) — one process per candle series.
+  trade-bot-recommend-4h:
+    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
+    container_name: btc_trade_bot_recommend_4h
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - trade_bot_data:/app/data
+      - trade_bot_logs:/app/logs
+    command: ["python", "main.py", "recommend", "--timeframe", "4h"]
 
 volumes:
   trade_bot_data:
