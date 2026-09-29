@@ -645,6 +645,9 @@ def main() -> None:
         "results to Telegram in a copy-paste-friendly format",
     )
     research_parser.add_argument("--strategy", choices=STRATEGY_CHOICES, required=True)
+    research_parser.add_argument(
+        "--symbol", default=None, help="e.g. ETH/USDT for a cross-asset check (defaults to exchange.symbol)"
+    )
     research_parser.add_argument("--timeframe", default="1d")
     research_parser.add_argument(
         "--param",

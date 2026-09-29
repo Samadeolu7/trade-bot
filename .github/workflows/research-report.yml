@@ -13,6 +13,10 @@ on:
         description: "Strategy to test (e.g. crt, donchian, vol_expansion)"
         default: "crt"
         required: true
+      symbol:
+        description: "Pair to test (BTC/USDT, ETH/USDT, SOL/USDT...)"
+        default: "BTC/USDT"
+        required: true
       timeframe:
         description: "Candle timeframe (1d, 4h, 1h)"
         default: "1d"
@@ -38,11 +42,13 @@ jobs:
       - name: Validate inputs
         env:
           STRATEGY: ${{ inputs.strategy }}
+          SYMBOL: ${{ inputs.symbol }}
           TIMEFRAME: ${{ inputs.timeframe }}
           PARAMS: ${{ inputs.params }}
           BASELINE: ${{ inputs.baseline }}
         run: |
           [[ "$STRATEGY" =~ ^[a-z_]+$ ]] || { echo "bad strategy"; exit 1; }
+          [[ "$SYMBOL" =~ ^[A-Z0-9]+/[A-Z0-9]+$ ]] || { echo "bad symbol"; exit 1; }
           [[ "$TIMEFRAME" =~ ^[0-9]+[mhdw]$ ]] || { echo "bad timeframe"; exit 1; }
           [[ "$BASELINE" =~ ^[a-z_]+$ ]] || { echo "bad baseline"; exit 1; }
           [[ "$PARAMS" =~ ^[-a-zA-Z0-9_.,=\ ]*$ ]] || { echo "bad params"; exit 1; }
@@ -51,6 +57,7 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         env:
           STRATEGY: ${{ inputs.strategy }}
+          SYMBOL: ${{ inputs.symbol }}
           TIMEFRAME: ${{ inputs.timeframe }}
           PARAMS: ${{ inputs.params }}
           BASELINE: ${{ inputs.baseline }}
@@ -58,7 +65,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: STRATEGY,TIMEFRAME,PARAMS,BASELINE
+          envs: STRATEGY,SYMBOL,TIMEFRAME,PARAMS,BASELINE
           command_timeout: 20m
           script: |
             set -e
@@ -67,6 +74,6 @@ jobs:
             # so a timeframe the live poller only ever seeded recently still
             # gets its whole train window
             docker compose run --rm trade-bot python main.py backfill \
-              --symbol BTC/USDT --timeframe "$TIMEFRAME" --start 2020-01-01T00:00:00Z --no-resume
+              --symbol "$SYMBOL" --timeframe "$TIMEFRAME" --start 2020-01-01T00:00:00Z --no-resume
             docker compose run --rm trade-bot python main.py research-report \
-              --strategy "$STRATEGY" --timeframe "$TIMEFRAME" --baseline "$BASELINE" $PARAMS
+              --strategy "$STRATEGY" --symbol "$SYMBOL" --timeframe "$TIMEFRAME" --baseline "$BASELINE" $PARAMS
