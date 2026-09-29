@@ -1,0 +1,608 @@
+<title>BTC/USD Bot Spec</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --bg:#f6f5f1;
+    --surface:#ffffff;
+    --surface-2:#ece9e0;
+    --text:#221f1a;
+    --text-muted:#6c6559;
+    --border:#ddd7c9;
+    --accent:#a8672b;
+    --accent-strong:#7d4a1a;
+    --accent-soft:#f0e3d1;
+    --good:#3f7a56;
+    --good-soft:#e4efe6;
+    --bad:#a8443a;
+    --bad-soft:#f5e6e3;
+    --neutral-chip:#8a8578;
+    --neutral-chip-soft:#eeece5;
+    --code-fg:#5a4326;
+    --shadow: 0 1px 2px rgba(40,30,10,0.06), 0 6px 20px rgba(40,30,10,0.05);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#18150f;
+      --surface:#211c14;
+      --surface-2:#2a241a;
+      --text:#ece5d5;
+      --text-muted:#a79c88;
+      --border:#3b3324;
+      --accent:#dc9a4d;
+      --accent-strong:#f2b878;
+      --accent-soft:#3a2c17;
+      --good:#7fc79b;
+      --good-soft:#20301f;
+      --bad:#e08a7d;
+      --bad-soft:#382019;
+      --neutral-chip:#a79c88;
+      --neutral-chip-soft:#2a2519;
+      --code-fg:#e8c891;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 6px 24px rgba(0,0,0,0.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#18150f;
+    --surface:#211c14;
+    --surface-2:#2a241a;
+    --text:#ece5d5;
+    --text-muted:#a79c88;
+    --border:#3b3324;
+    --accent:#dc9a4d;
+    --accent-strong:#f2b878;
+    --accent-soft:#3a2c17;
+    --good:#7fc79b;
+    --good-soft:#20301f;
+    --bad:#e08a7d;
+    --bad-soft:#382019;
+    --neutral-chip:#a79c88;
+    --neutral-chip-soft:#2a2519;
+    --code-fg:#e8c891;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 6px 24px rgba(0,0,0,0.35);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:'IBM Plex Serif', Georgia, 'Times New Roman', serif;
+    font-size:16.5px;
+    line-height:1.65;
+  }
+  h1,h2,h3,.eyebrow,nav,.chip,th,.stat-label{ font-family:'IBM Plex Sans','Segoe UI',system-ui,sans-serif; }
+  code, pre, kbd, .mono{ font-family:'IBM Plex Mono','SFMono-Regular',Consolas,monospace; }
+
+  a{ color:var(--accent-strong); }
+  a:focus-visible, button:focus-visible, summary:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+
+  .shell{
+    max-width:1180px;
+    margin:0 auto;
+    display:grid;
+    grid-template-columns:250px minmax(0,1fr);
+    gap:0;
+    align-items:start;
+  }
+
+  /* ---------- Sidebar ---------- */
+  aside.toc{
+    position:sticky;
+    top:0;
+    height:100vh;
+    overflow-y:auto;
+    padding:28px 18px 40px 28px;
+    border-right:1px solid var(--border);
+  }
+  .toc .brand{
+    display:flex; flex-direction:column; gap:2px;
+    margin-bottom:22px;
+    padding-bottom:16px;
+    border-bottom:1px solid var(--border);
+  }
+  .toc .brand .mark{ font-size:22px; }
+  .toc .brand .name{ font-weight:700; font-size:15px; letter-spacing:0.01em; }
+  .toc .brand .tag{ font-size:11.5px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.08em; }
+
+  .toc ol{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px; counter-reset:none; }
+  .toc a{
+    display:flex; gap:10px; align-items:baseline;
+    text-decoration:none; color:var(--text);
+    font-size:13.2px;
+    padding:6px 8px;
+    border-radius:6px;
+  }
+  .toc a:hover{ background:var(--surface-2); }
+  .toc a .num{ color:var(--accent-strong); font-weight:600; min-width:22px; font-variant-numeric:tabular-nums; }
+  .toc .sub{ padding-left:8px; opacity:0.9; }
+
+  /* ---------- Main column ---------- */
+  main{ padding:44px 48px 90px; min-width:0; }
+
+  header.hero{ max-width:74ch; margin-bottom:8px; }
+  .eyebrow{
+    text-transform:uppercase; letter-spacing:0.12em; font-size:12px; font-weight:600;
+    color:var(--accent-strong); margin-bottom:10px;
+  }
+  h1{
+    font-size:clamp(28px,4vw,40px);
+    line-height:1.08;
+    font-weight:700;
+    margin:0 0 14px;
+    text-wrap:balance;
+    letter-spacing:-0.01em;
+  }
+  .dek{ color:var(--text-muted); font-size:17px; max-width:62ch; margin:0 0 28px; }
+
+  .callout{
+    border:1px solid var(--border);
+    border-left:3px solid var(--accent);
+    background:var(--surface);
+    border-radius:8px;
+    padding:16px 20px;
+    margin:26px 0 40px;
+    box-shadow:var(--shadow);
+    font-size:15px;
+  }
+  .callout .label{
+    font-family:'IBM Plex Sans',sans-serif; font-weight:700; font-size:11.5px;
+    text-transform:uppercase; letter-spacing:0.08em; color:var(--accent-strong);
+    display:block; margin-bottom:6px;
+  }
+  .callout.warn{ border-left-color:var(--bad); }
+  .callout.warn .label{ color:var(--bad); }
+
+  section.spec{ max-width:74ch; margin:0 0 8px; scroll-margin-top:20px; }
+  section.spec.wide{ max-width:none; }
+
+  h2{
+    font-size:23px; font-weight:700; letter-spacing:-0.005em;
+    margin:56px 0 6px; text-wrap:balance;
+    display:flex; align-items:baseline; gap:10px;
+  }
+  h2 .secnum{ color:var(--accent); font-variant-numeric:tabular-nums; }
+  section.spec:first-of-type h2{ margin-top:30px; }
+  h3{ font-size:16.5px; font-weight:600; margin:26px 0 8px; }
+
+  p{ margin:0 0 14px; }
+  ul,ol{ margin:0 0 16px; padding-left:1.35em; }
+  li{ margin-bottom:7px; }
+  li::marker{ color:var(--accent-strong); }
+
+  code{
+    background:var(--surface-2); color:var(--code-fg);
+    padding:0.1em 0.4em; border-radius:4px; font-size:0.86em;
+    word-break:break-word;
+  }
+
+  strong{ font-weight:600; }
+  em{ font-style:italic; }
+
+  hr.divider{ border:none; border-top:1px solid var(--border); margin:40px 0; }
+
+  /* ---------- Tables ---------- */
+  .table-wrap{ overflow-x:auto; margin:18px 0 22px; border:1px solid var(--border); border-radius:10px; box-shadow:var(--shadow); }
+  table{ border-collapse:collapse; width:100%; font-size:14.5px; background:var(--surface); }
+  th,td{ padding:10px 14px; text-align:left; border-bottom:1px solid var(--border); white-space:nowrap; }
+  thead th{
+    font-size:11.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted);
+    background:var(--surface-2); font-weight:600;
+  }
+  tbody tr:last-child td{ border-bottom:none; }
+  td.num, th.num{ font-family:'IBM Plex Mono',monospace; font-variant-numeric:tabular-nums; text-align:right; }
+  td.good{ color:var(--good); font-weight:600; }
+  td.bad{ color:var(--bad); font-weight:600; }
+
+  /* ---------- Strategy cards (Section 7) ---------- */
+  .strategy{
+    border:1px solid var(--border);
+    border-radius:10px;
+    background:var(--surface);
+    box-shadow:var(--shadow);
+    padding:18px 22px 20px;
+    margin:16px 0 20px;
+  }
+  .strategy .head{ display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:8px; }
+  .strategy .head h3{ margin:0; font-size:16px; }
+  .strategy p:last-child{ margin-bottom:0; }
+  .strategy .finding{
+    margin-top:12px; padding:10px 14px; border-radius:8px;
+    background:var(--surface-2); font-size:14.5px; border-left:3px solid var(--border);
+  }
+
+  .chip{
+    display:inline-flex; align-items:center; gap:5px;
+    font-size:10.8px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em;
+    padding:3px 9px; border-radius:100px; white-space:nowrap;
+    border:1px solid transparent;
+  }
+  .chip.control{ background:var(--accent); color:#fff8ee; }
+  .chip.shadow{ background:transparent; color:var(--accent-strong); border-color:var(--accent); }
+  .chip.weak{ background:var(--bad-soft); color:var(--bad); }
+  .chip.hold{ background:var(--neutral-chip-soft); color:var(--neutral-chip); }
+
+  /* ---------- Diagrams ---------- */
+  .flow{ display:flex; flex-direction:column; align-items:center; gap:0; margin:24px 0 8px; }
+  .flow-row{ display:flex; align-items:stretch; gap:0; flex-wrap:wrap; justify-content:center; }
+  .node{
+    border:1px solid var(--border); background:var(--surface); border-radius:8px;
+    padding:11px 16px; font-family:'IBM Plex Mono',monospace; font-size:12.6px; text-align:center;
+    box-shadow:var(--shadow); max-width:230px;
+  }
+  .node.accent{ border-color:var(--accent); background:var(--accent-soft); }
+  .node .cap{ display:block; font-family:'IBM Plex Sans',sans-serif; font-size:10px; text-transform:uppercase;
+    letter-spacing:0.06em; color:var(--text-muted); margin-bottom:3px; }
+  .arrow-down{ color:var(--accent); font-size:18px; line-height:1; margin:2px 0; }
+  .branch-wrap{ display:flex; flex-direction:column; align-items:center; }
+  .branch{ display:flex; gap:34px; margin-top:4px; }
+  .branch .col{ display:flex; flex-direction:column; align-items:center; gap:0; }
+
+  .lifecycle{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:22px 0 10px; }
+  .lifecycle .node{ max-width:210px; }
+  .lifecycle .arrow{ color:var(--accent); font-size:20px; }
+  .lifecycle .rep{ font-size:11px; color:var(--text-muted); font-family:'IBM Plex Sans',sans-serif; text-align:center; }
+
+  /* ---------- Build order ---------- */
+  .phases{ list-style:none; margin:20px 0; padding:0; display:flex; flex-direction:column; gap:0; }
+  .phases li{
+    position:relative; padding:4px 0 20px 40px; margin:0; border-left:2px solid var(--border);
+  }
+  .phases li:last-child{ border-left-color:transparent; padding-bottom:0; }
+  .phases li::marker{ content:none; }
+  .phases li::before{
+    content:attr(data-phase);
+    position:absolute; left:-15px; top:2px;
+    width:28px; height:28px; border-radius:50%;
+    background:var(--accent); color:#fff8ee;
+    font-family:'IBM Plex Sans',sans-serif; font-weight:700; font-size:12px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .phases li.sub::before{ background:var(--surface); color:var(--accent-strong); border:2px solid var(--accent); width:24px; height:24px; left:-13px; font-size:10.5px; }
+  .phases h3{ margin:0 0 4px; font-size:15.5px; }
+
+  footer.disclaimer{
+    max-width:74ch; margin-top:60px; padding:18px 22px; border-radius:10px;
+    background:var(--surface-2); border:1px solid var(--border); font-size:14px; color:var(--text-muted);
+  }
+  footer.disclaimer strong{ color:var(--text); }
+
+  @media (max-width:880px){
+    .shell{ grid-template-columns:1fr; }
+    aside.toc{ position:relative; height:auto; border-right:none; border-bottom:1px solid var(--border); }
+    main{ padding:32px 22px 70px; }
+  }
+</style>
+
+<div class="shell">
+  <aside class="toc">
+    <div class="brand">
+      <span class="mark">🪙</span>
+      <span class="name">BTC/USD Bot</span>
+      <span class="tag">Build Specification</span>
+    </div>
+    <ol>
+      <li><a href="#s1"><span class="num">1</span> Scope &amp; Goals</a></li>
+      <li><a href="#s2"><span class="num">2</span> Constraints</a></li>
+      <li><a href="#s3"><span class="num">3</span> Recommended Stack</a></li>
+      <li><a href="#s4"><span class="num">4</span> System Architecture</a></li>
+      <li><a href="#s5"><span class="num">5</span> Data Layer</a></li>
+      <li><a href="#s6"><span class="num">6</span> Strategy Engine</a></li>
+      <li><a href="#s7"><span class="num">7</span> Candidate Strategies</a></li>
+      <li><a href="#s8"><span class="num">8</span> Backtesting</a></li>
+      <li><a href="#s9"><span class="num">9</span> Alerting Layer</a></li>
+      <li><a href="#s95"><span class="num">9.5</span> Recommendation Layer</a></li>
+      <li><a href="#s10"><span class="num">10</span> Execution (Quidax)</a></li>
+      <li><a href="#s11"><span class="num">11</span> Storage &amp; Logging</a></li>
+      <li><a href="#s12"><span class="num">12</span> VPS Deployment</a></li>
+      <li><a href="#s13"><span class="num">13</span> Build Order</a></li>
+      <li><a href="#s14"><span class="num">14</span> Disclaimer</a></li>
+    </ol>
+  </aside>
+
+  <main>
+    <header class="hero">
+      <div class="eyebrow">Handoff note, for Claude Code</div>
+      <h1>BTC/USD custom trading bot — build specification</h1>
+      <p class="dek">A self-hosted BTC/USD signal bot, meant to run unattended on the author's own VPS (Docker + Traefik already in place). Build in the phases listed in Section 13 — each phase independently runnable and testable before the next. Alert-only and paper-trading phases come first; live trading is not skipped to.</p>
+    </header>
+
+    <section class="spec" id="s1">
+      <h2><span class="secnum">1</span> Scope &amp; Goals</h2>
+      <ul>
+        <li>Monitor BTC/USD price action and fire custom signals not available in mainstream free tools (e.g. TradingView's free tier).</li>
+        <li>Deliver alerts via Telegram in real time.</li>
+        <li>Optionally (later phase, opt-in) support semi-automated or fully automated execution.</li>
+        <li>Run entirely on the author's own VPS — $0 recurring cost beyond the VPS itself.</li>
+        <li>Config-driven: strategy parameters editable without touching code.</li>
+      </ul>
+    </section>
+
+    <section class="spec" id="s2">
+      <h2><span class="secnum">2</span> Constraints</h2>
+      <ul>
+        <li>No paid data feeds, no paid backtesting/SaaS tools.</li>
+        <li>Must run unattended and recover from crashes (Docker restart policy or systemd).</li>
+        <li>Secrets (API keys, bot tokens) via environment variables / <code>.env</code>, never hardcoded or committed.</li>
+        <li>Most crypto exchanges quote <strong>BTC/USDT</strong>, not literal BTC/USD. USDT is functionally equivalent to USD for this purpose.</li>
+        <li><strong>Data vs. custody split (Nigeria-specific):</strong> Binance is used <strong>strictly as a read-only public data source</strong> — historical/live OHLCV and funding-rate data, no API key, no funds ever touch it. All order placement and fund custody happens on <strong>Quidax</strong>, a Nigerian SEC-provisionally-licensed exchange with direct NGN bank rails and a bot-friendly REST API — sidestepping Binance's shifting Nigeria-specific restrictions while keeping Binance's much deeper history for backtesting. Fee-wise the two are close to equivalent (both 0.1% taker on order-book trades), so this split is a risk decision, not a cost one.</li>
+      </ul>
+    </section>
+
+    <section class="spec wide" id="s3">
+      <h2><span class="secnum">3</span> Recommended Stack</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Layer</th><th>Tool</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td>Market data</td><td><code>ccxt</code> (Binance, read-only)</td><td>Free, deep historical OHLCV + funding-rate data, no API key needed for public endpoints</td></tr>
+            <tr><td>Execution</td><td>Custom REST client vs. Quidax's API</td><td>Quidax isn't in <code>ccxt</code>'s exchange list — a small <code>requests</code>-based wrapper around its documented endpoints</td></tr>
+            <tr><td>Data handling</td><td><code>pandas</code></td><td>Standard, and the user already knows Python</td></tr>
+            <tr><td>Indicators</td><td><code>pandas-ta</code></td><td>Free, wide coverage, no C build dependencies like TA-Lib</td></tr>
+            <tr><td>Backtesting</td><td><code>vectorbt</code> (or <code>backtrader</code>)</td><td>Free, vectorized, fast enough for iterating on strategy ideas</td></tr>
+            <tr><td>Alerting</td><td>Telegram Bot API</td><td>Free, instant, reliable, easy to script</td></tr>
+            <tr><td>Storage</td><td>SQLite</td><td>Zero-ops, plenty for candle/signal/trade logging at this scale</td></tr>
+            <tr><td>Scheduling / runtime</td><td>Long-running process in Docker</td><td><code>unless-stopped</code> restart policy, matches the VPS's existing setup</td></tr>
+            <tr><td>Secrets</td><td><code>.env</code> + <code>python-dotenv</code></td><td>Simple, standard</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="spec wide" id="s4">
+      <h2><span class="secnum">4</span> System Architecture</h2>
+      <p class="dek" style="max-width:74ch">All events logged to SQLite for later review and strategy comparison.</p>
+      <div class="flow">
+        <div class="node accent"><span class="cap">Read-only, no key</span>Binance public API — OHLCV + funding rate</div>
+        <div class="arrow-down">↓</div>
+        <div class="node">Data Layer — fetch + store OHLCV</div>
+        <div class="arrow-down">↓</div>
+        <div class="node">Strategy Engine — indicators + rules</div>
+        <div class="arrow-down">↓</div>
+        <div class="node accent">Signal Event — direction, entry, stop, target</div>
+        <div class="arrow-down">↓</div>
+        <div class="branch">
+          <div class="col">
+            <div class="node">Telegram Alert</div>
+          </div>
+          <div class="col">
+            <div class="node">Execution Layer <span style="opacity:.7">(optional)</span></div>
+            <div class="arrow-down">↓</div>
+            <div class="node accent">Quidax order API — custody + execution</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="spec" id="s5">
+      <h2><span class="secnum">5</span> Data Layer</h2>
+      <ul>
+        <li>Use <code>ccxt</code>'s <strong>Binance</strong> adapter in <strong>public/read-only mode only</strong> — no key or secret required for OHLCV candles or funding-rate data.</li>
+        <li>Poll or stream OHLCV candles (WebSocket preferred for latency; REST polling is fine to start — e.g. every 1–5 min depending on the strategy's timeframe).</li>
+        <li>Store candles in a local table: <code>candles(exchange, symbol, timeframe, open_time, open, high, low, close, volume)</code>.</li>
+        <li>Backfill enough historical data (ideally 2–3 years) to backtest across different market regimes, not just recent bull conditions — Binance's history is far deeper than Quidax's, which is why it's used for this layer.</li>
+        <li>Respect exchange rate limits — <code>ccxt</code> exposes these; don't poll faster than needed.</li>
+        <li><strong>Separately</strong>, backfill Quidax's own BTC/USDT order-book depth and recent trade history so live signal execution is checked against Quidax's actual tradable liquidity, not just Binance's — the two can diverge, especially in size.</li>
+      </ul>
+    </section>
+
+    <section class="spec" id="s6">
+      <h2><span class="secnum">6</span> Strategy Engine</h2>
+      <ul>
+        <li>Build a pluggable strategy interface (a base class with a <code>generate_signal(df) -&gt; Signal | None</code> method) so multiple strategies run side by side and swap via config, not code.</li>
+        <li>Each strategy reads its parameters from a config file — timeframe, indicator periods, thresholds, position sizing rule.</li>
+        <li>A <code>Signal</code> event carries: symbol, timeframe, direction (long/short/flat), entry price, stop-loss, take-profit, confidence/reason string, timestamp.</li>
+        <li>A <strong>market regime filter</strong> (ADX, realized volatility, or price vs. SMA(200)) decides which sub-strategy is "live" — the part that's genuinely different from one static TradingView alert. An independent reproducible backtest (CoinQuant, BTCUSDT daily, 2021–2026, fees included) found an SMA(200) trend filter drove the best risk-adjusted result of the strategies tested (profit factor 2.02) — worth backtesting as the primary switch, ADX as secondary confirmation.</li>
+      </ul>
+      <div class="callout">
+        <span class="label">NATR regime filter — findings</span>
+        Normalized ATR (ATR/price) vs. its own trailing history — a different axis from ADX/SMA200 (volatility <em>expansion</em> vs. trend <em>strength/extension</em>), on the premise BTC moves in volatility clusters. On BTC/USDT 2020–2023 (donchian trend, flat ranging): NATR gave 10 trades, +9.33% return, −4.77% max DD, 70% win rate, PF 4.90; ADX on the identical window gave 12 trades, +7.52%, −2.74% max DD, 50% win rate, PF 4.93 — nearly identical profit factor despite different mechanics. Neither result is trustworthy alone at 10–12 trades — same sample-size caveat that already burned the <code>rsi_bb</code> evaluation. Treat as "no evidence NATR is better, no evidence it's worse." Deployed default stays <code>adx</code>.
+      </div>
+    </section>
+
+    <section class="spec wide" id="s7">
+      <h2><span class="secnum">7</span> Candidate Strategies for BTC/USD</h2>
+      <p>None of these are guaranteed profitable — they're starting points to implement, backtest, and tune. Crypto markets shift between regimes often; treat every number below as a first guess to validate on real data, not a final setting.</p>
+
+      <div class="strategy">
+        <div class="head"><h3>a) Trend-following: EMA cross + ATR trailing stop</h3><span class="chip hold">implemented, not deployed</span></div>
+        <p>Long when a fast EMA (e.g. 20) crosses above a slow EMA (e.g. 50) on a higher timeframe (4h or 1D), exit via an ATR(14)-based trailing stop (e.g. 2× ATR) rather than a fixed target. Works well in sustained directional moves; tends to whipsaw in choppy, range-bound conditions — pair with the regime filter so it's only "live" when trend strength (ADX ≳ 20–25) confirms a trend.</p>
+      </div>
+
+      <div class="strategy">
+        <div class="head"><h3>b) Mean-reversion: RSI + Bollinger Bands in range regimes</h3><span class="chip weak">tested — not deployed</span></div>
+        <p>In detected range-bound conditions (low ADX), fade extremes — RSI(14) &lt; 30 near the lower Bollinger Band as a long signal, RSI &gt; 70 near the upper band as a short. Works in sideways chop; loses badly if it fires during a real trend, which is why gating it behind a regime filter matters.</p>
+      </div>
+
+      <div class="strategy">
+        <div class="head"><h3>c) Volatility breakout: Bollinger Band squeeze + expansion</h3><span class="chip shadow">deployed — shadow-testing</span></div>
+        <p>BTC tends to move in volatility clusters — long compression (tight Bollinger Bands / low ATR) often precedes a sharp expansion. Enter in the breakout direction; a stop just inside the pre-breakout range. False breakouts are the main failure mode.</p>
+        <div class="finding">Implemented as <code>VolatilityExpansionBreakoutStrategy</code> (<code>bot/strategy/vol_expansion.py</code>), without the original idea's volume-confirmation half (a candidate future refinement, not yet built). Band width, normalized by price, counts as a "squeeze" at or below its own rolling <code>squeeze_percentile</code> over <code>squeeze_lookback</code> bars — self-relative, like <code>NatrRegimeFilter</code>. A signal only fires when the bar <em>before</em> the breakout was squeezed, width is now expanding, and price closes beyond the <em>prior</em> bar's band edge (a same-bar band would be pulled wide enough by its own extreme close to hide the breakout — same reasoning as donchian's shifted channel). Deployed standalone, no regime filter — no backtest verdict logged yet.</div>
+      </div>
+
+      <div class="strategy">
+        <div class="head"><h3>d) Crypto-specific: funding-rate mean-reversion</h3><span class="chip shadow">deployed — shadow-testing</span></div>
+        <p>Perpetual futures funding rates are public and often overextend at sentiment extremes — very high positive funding correlates with over-leveraged longs (pullback risk), very negative with over-leveraged shorts. Pulled read-only via <code>ccxt</code>'s Binance funding-rate endpoint (Quidax is spot-only). Used as a filter/confirmation only — the trade still executes on Quidax's spot market.</p>
+        <div class="finding">Implemented as <code>FundingFilteredStrategy</code> (<code>bot/strategy/funding_filter.py</code>): wraps a base trend strategy (default donchian) and vetoes a new long when funding exceeds <code>high_threshold</code>, or a new short when funding is below <code>low_threshold</code> — a veto, not its own entry rule. Thresholds default ±0.0005, an untested guess. Funding data comes from a separate <code>binanceusdm</code> client and its own table, looked up per bar via as-of/backward alignment. Live shadow runs refresh it every iteration via <code>Strategy.before_poll()</code>. Deployed as <code>donchian_funding_filtered</code> — no verdict logged yet, evaluated live per "testing hypotheses is cheap now."</div>
+      </div>
+
+      <div class="strategy">
+        <div class="head"><h3>e) Trend-following: 20-bar Donchian breakout</h3><span class="chip control">deployed — control</span></div>
+        <p>Long when price closes above the highest high of the prior 20 daily bars, exit when it closes below the lowest low of the prior 20. In the referenced independent backtest, the single best performer by raw return (+118.4% over 2021–2026 on BTCUSDT, 24 trades, 50% win rate, PF 1.45) — but also the largest drawdown of the trend strategies tested (48.6%, concentrated in the 2022 bear market). Cheap to implement — just a rolling max/min comparison.</p>
+      </div>
+
+      <div class="strategy">
+        <div class="head"><h3>f) Market-structure breakout + retest</h3><span class="chip weak">weak, not pursued further</span></div>
+        <p>Find the most recent confirmed swing high/low (a fractal), wait for a breakout close, wait for a retest of that level, then enter on confirmed rejection/continuation. Deliberately a different hypothesis from (a)/(e) — those ask "what do the indicators say," this asks "what is price actually doing."</p>
+        <div class="finding">On BTC/USDT 2020–2023: best-of-9 in a <code>swing_window</code>/<code>retest_window</code> sweep was PF 1.22 (67 trades, +9.37% return, −14.5% max DD) — every combo clustered in a narrow, unremarkable PF 1.0–1.22 band. Clearly weaker than donchian's PF 3.94 on the identical window. Recommendation: don't deploy or tune further as designed — a tested, logged negative result, same treatment as <code>rsi_bb</code>. The core idea may still have merit with a different rule set (tracking multiple unresolved swing levels, or requiring volume/momentum confirmation), but that's a distinct redesign.</div>
+      </div>
+
+      <p><strong>Explicitly not included: naive grid trading.</strong> The most heavily marketed "profitable" crypto bot strategy, but the claims behind it are almost entirely exchange marketing, and its mechanics are structurally built for sideways markets — a strong sustained trend leaves it holding unrealized losing positions, the same failure mode that made the Bollinger mean-reversion strategy the worst performer in the real test (65.7% win rate, only +10.4% return, 52.7% drawdown). If added later, it needs a hard "pause during confirmed trend" kill-switch, not a standalone always-on strategy.</p>
+
+      <div class="callout">
+        <span class="label">Evidence note</span>
+        Strategies (a) and (e) were validated against an independent, reproducible backtest (CoinQuant, BTCUSDT daily, Jan 2021–Aug 2026, 0.1% taker fees included, spans the 2021 bull run, 2022 crash, 2023–26 cycle). None of the five families tested there beat plain buy-and-hold Bitcoin on raw return — their edge was a much smaller drawdown and far less time exposed to the market. Treat that as the realistic bar: a better risk profile than holding, not a guarantee of beating it.
+      </div>
+      <ul>
+        <li>Risk a small, fixed percentage of capital per trade (0.5–1%), sized off the stop-loss distance, not a fixed coin amount.</li>
+        <li>Cap max concurrent open positions.</li>
+        <li>Add a daily/weekly loss circuit-breaker that pauses the bot after a max drawdown threshold, rather than trading through a bad stretch.</li>
+        <li>Avoid leverage until the strategy has a solid live track record on paper; if used later, keep it conservative.</li>
+      </ul>
+    </section>
+
+    <section class="spec wide" id="s8">
+      <h2><span class="secnum">8</span> Backtesting Requirements</h2>
+      <ul style="max-width:74ch">
+        <li>Include realistic taker fees — Quidax's actual 0.1% order-book fee, since that's where trades execute — plus a slippage assumption. Backtests without fees/slippage are misleading.</li>
+        <li>Test across multiple distinct BTC regimes (2020–21 bull run, 2022 bear market, a choppy/sideways stretch), not just recent months.</li>
+        <li>Use walk-forward or out-of-sample validation, not just an in-sample fit — curve-fitting to past data is the biggest risk.</li>
+        <li>Track more than total return: Sharpe ratio, max drawdown, win rate, and profit factor all matter.</li>
+        <li><strong>Single-sample-path caveat:</strong> BTC has only one historical price path (~6–7 years of meaningful data). A public study and this project's own backtests draw on largely the same history — that overlap means they aren't independent confirmations of each other. Cross-asset validation (Phase 3.5) is the practical way to get independent evidence without waiting years for fresh candles.</li>
+      </ul>
+
+      <div class="callout">
+        <span class="label">Pilot backtest findings</span>
+        An initial sweep found <code>rsi_bb</code> produces only 2–5 trades across a 4-year window regardless of parameters, with results swinging from +$138 to −$449 on small threshold changes — not enough trades to distinguish a real edge from noise, and it did not beat plain <code>donchian</code> on the identical window. Recommendation: don't deploy <code>rsi_bb</code> as designed; "stay in cash while ranging" is the more defensible default (adopted). Separately, <code>donchian</code> with a widened exit channel (20/55) looked strong in-sample on 2020–23 (PF 3.94, 64.3% win rate) but came back essentially breakeven out-of-sample on 2024+ (PF 0.91, 50% win rate) — no confirmed edge yet on BTC alone.
+      </div>
+
+      <h3>Phase 3.5 cross-asset results</h3>
+      <p style="max-width:74ch">Same fixed rule set, no per-asset tuning, same train/test split.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Asset</th><th class="num">Train return / PF</th><th class="num">Train buy-hold</th><th class="num">Test return / PF</th><th class="num">Test max DD</th><th class="num">Test buy-hold</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>BTC/USDT</td><td class="num">+7.91% / 3.94</td><td class="num">+487.2%</td><td class="num bad">−0.40% / 0.91</td><td class="num">−3.32%</td><td class="num">+80.49%</td></tr>
+            <tr><td>ETH/USDT</td><td class="num">+14.46% / 4.40</td><td class="num">+1644.95%</td><td class="num good">+2.59% / 2.21</td><td class="num">−2.62%</td><td class="num">+4.65%</td></tr>
+            <tr><td>SOL/USDT</td><td class="num">+84.18% / 17.68</td><td class="num">+2983.83%</td><td class="num bad">−4.32% / 0.30</td><td class="num">−7.03%</td><td class="num">−6.27%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="max-width:74ch"><strong>Verdict: mixed, not purely BTC-specific.</strong> ETH's out-of-sample result is genuinely encouraging — comfortably profitable (PF 2.21), tiny drawdown, meaningfully beat a nearly-flat buy-and-hold. BTC is roughly breakeven. SOL clearly fails (PF 0.30) even though it also lost less than its own buy-and-hold there. Two of three assets clear the Phase 4 acceptance bar out-of-sample, one doesn't — reads as a weak, asset-dependent mechanism rather than a robust cross-asset edge or a pure BTC artifact. Worth shadow-testing at alert-only risk, not worth trusting with capital yet.</p>
+
+      <div class="callout warn">
+        <span class="label">Holdout enforcement — methodology fix</span>
+        The "out-of-sample" test above wasn't actually clean — the donchian exit-channel-width exploration (30/55/70/90) ran against 2023-01-01 onward with no end date, overlapping almost entirely with the same window later used as the 2024+ holdout. Going forward, <code>config.yaml</code>'s <code>validation.holdout_start</code> marks a reserved window: <code>sweep</code> can never touch it, <code>backtest</code> excludes it unless <code>--allow-holdout</code> is explicitly passed, and every deliberate use is logged to <code>notes/holdout_validations.md</code>. Doesn't retroactively clean the data already looked at — makes the mistake structurally harder to repeat going forward.
+      </div>
+    </section>
+
+    <section class="spec" id="s9">
+      <h2><span class="secnum">9</span> Alerting Layer</h2>
+      <ul>
+        <li>Create a bot via Telegram's BotFather, grab the bot token and target chat ID.</li>
+        <li>Alert types: signal fired (entry/stop/target/reason), daily summary, a heartbeat/error alert so the user knows if the process dies — a silent bot is worse than no bot — and, since 2026-09-09, a near-miss alert.</li>
+        <li>Keep the message format consistent and parseable (structured, not free text) in case it's parsed programmatically later.</li>
+      </ul>
+      <div class="callout">
+        <span class="label">Sanity-checking against your own reading of the market · 2026-09-09</span>
+        A signal-fired alert only tells you when a strategy <em>did</em> act — nothing about whether it <em>should have</em> and didn't, exactly the failure mode a silent bug would produce. Every <code>Strategy</code> now exposes <code>diagnose(df) -&gt; dict</code>: its current read of the market plus a <code>near_miss</code> flag for "a human would plausibly expect an entry soon" — even when <code>generate_signal</code> returns nothing. Three ways to see it:
+        <ol style="margin-top:10px">
+          <li><code>python main.py diagnose --strategy &lt;name&gt;</code> — prints the current diagnosis on demand, from the exact same config/override plumbing as <code>shadow</code>, backfilling fresh data first.</li>
+          <li>The daily Telegram summary appends <code>diag_*</code> fields from the diagnosis.</li>
+          <li>A <code>NEAR_MISS</code> alert fires the first time <code>near_miss</code> turns true, de-duplicated on a stable category key (not the human-readable reason, which can embed drifting numbers) so a persisting condition alerts once, not every 5-minute poll.</li>
+        </ol>
+      </div>
+      <p>Implemented for the four strategies actually deployed with a meaningful "why didn't this fire" story: <code>DonchianBreakoutStrategy</code> (proximity to either channel edge), <code>MultiTimeframeTrendPullbackStrategy</code> (HTF trend confirmed, daily pulled back, reclaim not yet closed — the canonical "pullback after trend" case), <code>VolatilityExpansionBreakoutStrategy</code> (currently squeezed, watching for a breakout), and <code>FundingFilteredStrategy</code> (base strategy would fire, but funding is vetoing it — more actionable than a generic near-miss, so it takes precedence). <code>RegimeSwitchedStrategy.diagnose</code> merges in whichever sub-strategy the regime says is currently "live." Strategies not in active shadow-run use (<code>ema_cross</code>, <code>rsi_bb</code>, <code>market_structure</code>) fall back to the base no-op default.</p>
+    </section>
+
+    <section class="spec wide" id="s95">
+      <h2><span class="secnum">9.5</span> Manual-Trading Recommendation Layer <span style="font-size:13px;color:var(--text-muted);font-weight:400">· 2026-09-09</span></h2>
+      <p style="max-width:74ch">A second, independent alert channel — <strong>not</strong> the automated Quidax-fee shadow-run simulation, and <strong>not</strong> Section 10's Quidax execution path. The user trades BTCUSD manually via MetaTrader 5 through Exness (a CFD venue, not spot) and wanted the same strategy logic to produce advisory entry/exit recommendations for that discretionary trading, reviewed and acted on by hand — the bot never places an order anywhere, on any venue, in this layer either.</p>
+
+      <ul style="max-width:74ch">
+        <li><code>python main.py recommend</code>: one process runs every strategy listed in <code>config.yaml</code>'s <code>recommend.strategies</code> (defaults to the same five configs the shadow runs use, extensible with one more YAML line — no code change). One shared candle backfill/Binance poll per cycle rather than one per strategy — the whole point was resource-sharing.</li>
+        <li>Reuses, unchanged: <code>Strategy</code>/<code>diagnose()</code>, the Binance candle data the shadow containers already backfill, <code>bot/backtest/engine.py</code>'s <code>open_position</code>/<code>check_exit</code>/<code>close_position</code> (fee/slippage swapped for Exness CFD-cost placeholders, not Quidax's spot fee — untested, tune to your actual account), and the shadow runner's own alert-scheduling helpers directly. A recommendation's "currently open" position is tracked via the exact same <code>paper_position</code>/<code>paper_trades</code>/<code>signals</code> tables, just under a <code>reco_</code>-prefixed <code>strategy_label</code> (e.g. <code>reco_donchian_adx_control</code>) so it can never be confused with a real shadow-run paper trade.</li>
+        <li><strong>Market-wide sentiment context:</strong> <code>bot/data/sentiment.py</code> fetches the Crypto Fear &amp; Greed Index (<code>alternative.me</code>, public/free/no key), refreshed at most once/day, stored in a <code>fear_greed_index</code> table. Advisory context only, attached to recommendation alerts — deliberately <strong>not</strong> wired into any strategy's entry/exit rule; that would be a new, separately-backtested strategy variant, not "just report it."</li>
+        <li>Explicitly out of scope for now: a live Exness/MT5 data feed (signals stay sourced from Binance spot candles — a flagged spot-vs-CFD approximation, not claimed identical) and a live Telegram↔Claude sentiment bridge (asked about, then paused — a real, separate future feature, not built).</li>
+      </ul>
+
+      <h3>Alert lifecycle, per recommendation</h3>
+      <div class="lifecycle">
+        <div class="node accent">RECOMMENDATION_ENTRY<br><span style="opacity:.75">entry · stop · target</span></div>
+        <span class="arrow">→</span>
+        <div>
+          <div class="node">RECOMMENDATION_STOP_UPDATE</div>
+          <div class="rep">zero or more, while open</div>
+        </div>
+        <span class="arrow">→</span>
+        <div class="node accent">RECOMMENDATION_EXIT<br><span style="opacity:.75">stop · take_profit · end_of_data</span></div>
+      </div>
+      <p style="max-width:74ch">Exactly one entry (always carries <code>entry=</code>/<code>stop=</code>/<code>target=</code> — the stop is the initial invalidation level), stop-updates only while open and only for trailing-stop strategies, then exactly one exit closing it out — a past entry alert is never ambiguous about whether it's still "in play." Current state is also visible on demand via a strategy's daily summary <code>position=</code> field (<code>flat</code> vs. <code>long since …</code>).</p>
+
+      <div class="callout">
+        <span class="label">Reading the daily summary's diag_* fields</span>
+        <code>diag_near_miss=False</code> always pairs with a blank <code>diag_near_miss_reason=</code> — the reason is <code>None</code> whenever there's no near-miss to explain, and the formatter renders <code>None</code> as an empty string rather than omitting the field. Not a bug; the reason only carries real text once <code>diag_near_miss=True</code>.
+      </div>
+    </section>
+
+    <section class="spec" id="s10">
+      <h2><span class="secnum">10</span> Execution Layer (Optional, later phase) — Quidax</h2>
+      <ul>
+        <li>Build a thin custom REST client against Quidax's documented API (<code>quidax.com/developers/api_v2</code>) for account/balance lookup, order-book snapshot, placing/cancelling orders — the one piece that can't reuse <code>ccxt</code>.</li>
+        <li>Generate the API key scoped to trading only — <strong>no withdrawal permission on the bot's key</strong>, ever. Withdrawals stay a manual, human action.</li>
+        <li>Start in "alert + manual confirm" mode (bot proposes a trade, user confirms via Telegram reply) before enabling full auto-execution.</li>
+        <li>Prefer limit orders over market orders on Quidax's order book to control slippage (order-book trades get the 0.1% fee; the "instant swap" convenience feature charges 1% and should be avoided).</li>
+        <li>Keep the same daily-loss circuit breaker from Section 7 active at the execution layer too, as a second safety net.</li>
+        <li>Log every order request/response verbatim (minus the API key) — Quidax's API is far less documented/battle-tested than Binance's.</li>
+      </ul>
+    </section>
+
+    <section class="spec" id="s11">
+      <h2><span class="secnum">11</span> Storage &amp; Logging</h2>
+      <ul>
+        <li>SQLite tables: <code>candles</code>, <code>signals</code>, <code>trades</code>, <code>equity_curve</code>.</li>
+        <li>Structured logs (not just print statements) with rotation so the VPS disk doesn't fill up over months of unattended running.</li>
+      </ul>
+    </section>
+
+    <section class="spec" id="s12">
+      <h2><span class="secnum">12</span> Deployment on the VPS</h2>
+      <ul>
+        <li>Package as a Docker service alongside the existing Docker/Traefik setup — no need to expose it via Traefik unless a status dashboard is added later.</li>
+        <li>Restart policy: <code>unless-stopped</code>.</li>
+        <li>All secrets via environment variables injected at deploy time, not baked into the image.</li>
+        <li>Optional: a lightweight health-check/status endpoint for monitoring.</li>
+      </ul>
+    </section>
+
+    <section class="spec wide" id="s13">
+      <h2><span class="secnum">13</span> Suggested Build Order</h2>
+      <ol class="phases">
+        <li data-phase="1">
+          <h3>Data</h3>
+          <p>Binance read-only connectivity via <code>ccxt</code>, OHLCV storage, historical backfill. No exchange account credentials needed yet.</p>
+        </li>
+        <li data-phase="2">
+          <h3>Strategy + Backtest</h3>
+          <p>Pluggable strategy interface, at least strategies (a) and (b), backtesting harness with Quidax's real fee (0.1%) and a slippage assumption, across multiple regimes.</p>
+        </li>
+        <li data-phase="3">
+          <h3>Alerting</h3>
+          <p>Telegram integration, paper-mode signal alerts only (no execution).</p>
+        </li>
+        <li class="sub" data-phase="3.5">
+          <h3>Cross-asset validation</h3>
+          <p>Before committing to a shadow run, re-run the exact fixed rule set from Phase 2 (no re-tuning) on ETH/USDT and 1–2 other liquid majors, same train/test windows. BTC has only one historical path, so repeated backtests against it aren't independent evidence — this is the fastest way to genuinely independent test data without waiting years for fresh BTC candles.</p>
+        </li>
+        <li data-phase="4">
+          <h3>Shadow run</h3>
+          <p>Live on the VPS in paper/alert-only mode for a few weeks, compared against backtest expectations before trusting it. <strong>Acceptance bar:</strong> "holds up near breakeven while meaningfully cutting drawdown and time-in-market versus holding," not "beats buy-and-hold."</p>
+          <div class="finding" style="margin-top:10px">
+            <strong>Concurrent shadow runs · 2026-09-07</strong> — rather than testing one candidate at a time, the infrastructure runs multiple strategies concurrently against the same candle data, each with fully independent paper-trading state (keyed by <code>strategy_label</code>, no shared capital). <code>docker-compose.yml</code> runs the control (<code>donchian_adx_control</code>) alongside four candidates — <code>multi_timeframe</code>, <code>donchian_natr_regime</code>, <code>vol_expansion</code>, <code>donchian_funding_filtered</code> — as separate services sharing one SQLite file (WAL mode) and one Telegram chat.
+          </div>
+        </li>
+        <li data-phase="5">
+          <h3>Execution (optional)</h3>
+          <p>Build the Quidax REST client, open a Quidax account + API key (trading scope only), manual-confirm mode first, full auto only after Phase 4 has proven out and the circuit-breaker/risk controls are tested.</p>
+        </li>
+      </ol>
+    </section>
+
+    <section class="spec" id="s14">
+      <h2><span class="secnum">14</span> Disclaimer</h2>
+      <footer class="disclaimer">
+        This spec is a technical build plan, <strong>not financial advice</strong>. No strategy here is guaranteed to be profitable — crypto markets are volatile and regimes change. Backtest thoroughly, paper-trade before risking capital, and only trade with money you can afford to lose. As of the most recent pilot testing (Section 8), none of the configurations tried so far have produced a result that clearly survives out-of-sample validation — expected at this stage, not a reason to abandon the approach, but it means Phase 5 (real execution) stays gated behind Phase 3.5 and a genuine Phase 4 shadow run, not opened on the strength of an in-sample backtest alone.
+      </footer>
+    </section>
+  </main>
+</div>
