@@ -66,6 +66,13 @@ strategy:
     squeeze_percentile: 0.2   # width at/below this percentile of its own trailing history counts as squeezed
     atr_period: 14            # trailing-stop ATR, same mechanism as the other trend strategies
     atr_mult: 2.0
+  donchian_ensemble:          # Zarattini et al. 2025 — research candidate, untested here (spec Section 7h)
+    lookback_days: [5, 10, 20, 30, 60, 90, 150, 250, 360]
+    bars_per_day: 1           # 1 for 1d candles, 6 for 4h — scales lookbacks and vol window
+    vol_target: 0.25          # annualized volatility the position is sized to
+    vol_window_days: 90       # realized-vol lookback
+    max_weight: 1.0           # max fraction of capital; 1.0 = no leverage
+    rebalance_threshold: 0.0  # skip rebalances smaller than this weight change (0 = rebalance every bar, as in the paper)
   crt:                        # Candle Range Theory — research candidate, untested (spec Section 7g)
     target: range             # range = opposite end of the range candle | rr = fixed rr_multiple x risk
     rr_multiple: 2.0          # target: rr only

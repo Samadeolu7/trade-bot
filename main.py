@@ -12,6 +12,7 @@ import pandas as pd
 from bot.alerting.messages import format_research_report
 from bot.alerting.telegram import TelegramAlerter
 from bot.backtest.engine import run_backtest
+from bot.backtest.exposure import run_exposure_backtest
 from bot.backtest.metrics import breakdown_by_strategy, summarize
 from bot.config import load_config
 from bot.data.backfill import backfill_candles
@@ -38,6 +39,7 @@ from bot.storage.db import (
 )
 from bot.strategy.crt import CandleRangeTheoryStrategy
 from bot.strategy.donchian import DonchianBreakoutStrategy
+from bot.strategy.donchian_ensemble import DonchianEnsembleStrategy
 from bot.strategy.ema_cross import EmaCrossStrategy
 from bot.strategy.flat import FlatStrategy
 from bot.strategy.funding_filter import FundingFilteredStrategy
@@ -53,7 +55,7 @@ logger = logging.getLogger(__name__)
 
 STRATEGY_CHOICES = [
     "ema_cross", "rsi_bb", "donchian", "market_structure", "multi_timeframe", "vol_expansion",
-    "funding_filtered", "regime_switched", "crt",
+    "funding_filtered", "regime_switched", "crt", "donchian_ensemble",
 ]
 TREND_STRATEGY_CHOICES = [
     "ema_cross", "donchian", "market_structure", "multi_timeframe", "vol_expansion",
@@ -246,16 +248,34 @@ def _run_backtest_once(
     backtest_config: dict,
     timeframe: str,
     funding_df: pd.DataFrame | None = None,
+    warmup_df: pd.DataFrame | None = None,
 ) -> dict:
+    """`warmup_df`: longer history ending where `df` ends, used only by
+    exposure strategies (fraction-of-capital sizing, e.g. donchian_ensemble)
+    to compute targets before the window starts — their longest lookback is
+    a year, which would otherwise sit idle through the first year of `df`."""
     strategy = _build_strategy(strategy_name, strategy_config, funding_df=funding_df)
-    result = run_backtest(
-        df,
-        strategy,
-        fee=backtest_config.get("fee", 0.001),
-        slippage=backtest_config.get("slippage", 0.0005),
-        initial_capital=backtest_config.get("initial_capital", 10_000.0),
-        risk_pct=backtest_config.get("risk_pct", 0.01),
-    )
+    if hasattr(strategy, "target_weights"):
+        weights = None
+        if warmup_df is not None and len(warmup_df):
+            weights = strategy.target_weights(warmup_df).reindex(df.index)
+        result = run_exposure_backtest(
+            df,
+            strategy,
+            fee=backtest_config.get("fee", 0.001),
+            slippage=backtest_config.get("slippage", 0.0005),
+            initial_capital=backtest_config.get("initial_capital", 10_000.0),
+            weights=weights,
+        )
+    else:
+        result = run_backtest(
+            df,
+            strategy,
+            fee=backtest_config.get("fee", 0.001),
+            slippage=backtest_config.get("slippage", 0.0005),
+            initial_capital=backtest_config.get("initial_capital", 10_000.0),
+            risk_pct=backtest_config.get("risk_pct", 0.01),
+        )
     summary = summarize(
         result.trades,
         result.equity_curve,
@@ -397,6 +417,8 @@ def _build_strategy(
         return VolatilityExpansionBreakoutStrategy(strategy_config.get("vol_expansion", {}))
     if name == "crt":
         return CandleRangeTheoryStrategy(strategy_config.get("crt", {}))
+    if name == "donchian_ensemble":
+        return DonchianEnsembleStrategy(strategy_config.get("donchian_ensemble", {}))
     if name == "funding_filtered":
         # base_strategy/high_threshold/low_threshold are config-driven (same
         # pattern as regime_switched's trend_strategy), not separate
@@ -875,8 +897,10 @@ def main() -> None:
             if len(window_df) == 0:
                 return None
             funding_df = _load_funding_df(config, conn) if name == "funding_filtered" else None
+            warmup_df = all_df[all_df.index <= window_df.index.max()]
             summary = _run_backtest_once(
-                window_df, name, strategy_config, backtest_config, args.timeframe, funding_df
+                window_df, name, strategy_config, backtest_config, args.timeframe, funding_df,
+                warmup_df=warmup_df,
             )
             _record_experiment(
                 conn, "research_report", name, name, symbol, args.timeframe, window_df,
@@ -962,6 +986,8 @@ def main() -> None:
         strategy = _build_strategy(
             args.strategy, strategy_config, funding_df=funding_df, funding_refresh_fn=funding_refresh_fn
         )
+        if hasattr(strategy, "target_weights"):
+            parser.error(f"{args.strategy} sizes as a fraction of capital; shadow runs don't support that yet")
 
         alerter = TelegramAlerter(
             os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
@@ -1046,6 +1072,8 @@ def main() -> None:
             strategy = _build_strategy(
                 strategy_name, strategy_config, funding_df=funding_df, funding_refresh_fn=funding_refresh_fn
             )
+            if hasattr(strategy, "target_weights"):
+                parser.error(f"{strategy_name} sizes as a fraction of capital; recommend doesn't support that yet")
             strategies.append((label, strategy))
 
         if not strategies:
