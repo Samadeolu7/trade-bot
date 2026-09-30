@@ -100,3 +100,27 @@ history. **Rule:** the portfolio is judged on *every* coin with data, with no
 dropping of losers after the fact. If the broad equal-weight portfolio still
 beats BTC alone in both windows, the multi-coin result isn't just survivor
 picking. The holdout check comes only after this, on a fixed design.
+
+**Batch 3 results (jobs 22–35), train → test Sharpe:** LTC 0.00→-0.31,
+LINK 0.95→0.20, DOT 1.13→0.05, AVAX 1.81→-0.31, ATOM 0.63→-0.30, TRX
+0.43→1.38, BCH 0.11→0.10, ETC 0.87→0.16, FIL 1.02→0.00, NEAR 0.69→-0.46,
+XLM 0.44→1.59, UNI 0.04→-0.10, LUNC 0.52→-0.07 (data only from 2022-09,
+after the collapse), FTT 1.56→-0.39. FTT's train window *includes* its
+Nov-2022 collapse, and the ensemble made +91% there, so it exited in time.
+Worst test loss on any coin: -9.7% (LTC), versus buy & hold losses of up
+to -90%.
+
+Equal-weight portfolios (daily-aligned; coins join when their data starts):
+
+| | Train Sharpe | Test return / DD / Sharpe |
+|---|---|---|
+| BTC only | ~1.31 | +30.8% / -11.1% / ~0.92 |
+| original 7 (survivor-picked) | ~1.66 | +29.8% / -6.8% / ~1.18 |
+| the 14 added coins | ~1.66 | +6.9% / -8.4% / ~0.40 |
+| all 21 | ~1.83 | +14.1% / -7.3% / ~0.74 |
+
+**Survivorship did flatter the 7-coin result.** On the broad set, test
+Sharpe falls below BTC alone. 2024–26 was an altcoin bear, and the ensemble
+limited the damage but couldn't profit. Next: point-in-time universes (top
+coins by market cap at each window's start, the paper's method), which
+removes the survivor pick. Adding EOS and XTZ (top-10 in Jan 2020).
