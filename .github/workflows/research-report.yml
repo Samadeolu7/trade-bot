@@ -36,6 +36,7 @@ on:
         default: "no"
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   DEPLOY_PATH: /opt/btc-trade-bot
 
 jobs:

@@ -1,10 +1,11 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
 import { client, unwrap } from '../api/client'
-import { keys, useExperiments, useJobs, useLifecycle, useMe, useStrategies } from '../api/hooks'
+import { keys, useExperiments, useJobs, useLifecycle, useMe } from '../api/hooks'
+import ReportForm, { draftFromJob, loadDraft, type ReportDraft } from '../components/ReportForm'
 import ShadowHistory from '../components/ShadowHistory'
 import { EquityChart } from '../components/charts'
-import { Button, Empty, ErrorText, Field, Panel, Status, Tabs, inputClass } from '../components/ui'
+import { Button, Empty, ErrorText, Panel, Status, Tabs, inputClass } from '../components/ui'
 import { dateTime, titleCase } from '../lib/format'
 
 type Summary = {
@@ -72,84 +73,13 @@ function RunTable({ runs }: { runs: Run[] }) {
   )
 }
 
-function NewJob() {
-  const qc = useQueryClient()
-  const { data: strategies } = useStrategies()
-  const [strategy, setStrategy] = useState('donchian')
-  const [timeframe, setTimeframe] = useState('4h')
-  const [baseline, setBaseline] = useState('donchian')
-  const [grid, setGrid] = useState('')
-  const [error, setError] = useState<unknown>(null)
-
-  const submit = async () => {
-    setError(null)
-    try {
-      const params: Record<string, unknown[]> = {}
-      for (const line of grid.split('\n').map((l) => l.trim()).filter(Boolean)) {
-        const [path, values] = line.split('=')
-        if (!values) throw new Error(`"${line}" should look like section.key = value, value`)
-        params[path.trim()] = values.split(',').map((v) => {
-          const t = v.trim()
-          if (t === 'true' || t === 'false') return t === 'true'
-          return t !== '' && !Number.isNaN(Number(t)) ? Number(t) : t
-        })
-      }
-      await unwrap(client.POST('/api/research/jobs', { body: { strategy, symbol: 'BTC/USDT', timeframe, baseline, params } }))
-      qc.invalidateQueries({ queryKey: keys.jobs })
-    } catch (err) {
-      setError(err)
-    }
-  }
-
-  return (
-    <Panel title="Run a research report">
-      <div className="grid gap-3 md:grid-cols-3">
-        <Field label="Strategy">
-          <select className={inputClass} value={strategy} onChange={(e) => setStrategy(e.target.value)}>
-            {strategies?.map((s) => <option key={s.name}>{s.name}</option>)}
-          </select>
-        </Field>
-        <Field label="Timeframe">
-          <select className={inputClass} value={timeframe} onChange={(e) => setTimeframe(e.target.value)}>
-            {['1h', '4h', '1d'].map((t) => <option key={t}>{t}</option>)}
-          </select>
-        </Field>
-        <Field label="Compare against">
-          <select className={inputClass} value={baseline} onChange={(e) => setBaseline(e.target.value)}>
-            <option value="none">Nothing</option>
-            {strategies?.map((s) => <option key={s.name}>{s.name}</option>)}
-          </select>
-        </Field>
-      </div>
-      <div className="mt-3">
-        <Field
-          label="Variants (optional, one parameter per line)"
-          hint="Every combination runs on the train (2020–2023) and test (2024 to the holdout) windows. The holdout window is never used here."
-        >
-          <textarea
-            className={`${inputClass} h-24 py-2`}
-            placeholder={'donchian.long_only = false, true\npyramid.max_adds = 0, 1, 2, 3'}
-            value={grid}
-            onChange={(e) => setGrid(e.target.value)}
-          />
-        </Field>
-      </div>
-      <div className="mt-3 flex items-center gap-3">
-        <Button variant="primary" onClick={submit}>
-          Run report
-        </Button>
-        <ErrorText error={error} />
-      </div>
-    </Panel>
-  )
-}
-
 function ReportPanel({
   title,
   subtitle,
   when,
   status,
   defaultOpen,
+  onRunAgain,
   children,
 }: {
   title: ReactNode
@@ -157,6 +87,7 @@ function ReportPanel({
   when: string
   status?: string
   defaultOpen: boolean
+  onRunAgain?: () => void
   children: ReactNode
 }) {
   const [open, setOpen] = useState(defaultOpen)
@@ -173,6 +104,11 @@ function ReportPanel({
         <span className="flex items-center gap-3 text-[13px] text-ink-2">
           {dateTime(when)}
           {status && status !== 'done' && <Status value={status} />}
+          {onRunAgain && (
+            <Button size="sm" onClick={onRunAgain} title="Fill the form with these settings">
+              Run again
+            </Button>
+          )}
           {(!status || status === 'done') && (
             <Button size="sm" onClick={() => setOpen(!open)} aria-expanded={open}>
               {open ? 'Hide results' : 'Show results'}
@@ -186,7 +122,7 @@ function ReportPanel({
   )
 }
 
-function Jobs() {
+function Jobs({ onRunAgain }: { onRunAgain?: (draft: ReportDraft) => void }) {
   const { data } = useJobs()
   if (!data?.length) return <Empty>No reports run from the app yet.</Empty>
   return (
@@ -203,6 +139,7 @@ function Jobs() {
             when={job.created_at}
             status={job.status}
             defaultOpen={index === 0}
+            onRunAgain={onRunAgain && (() => onRunAgain(draftFromJob(job.params as Parameters<typeof draftFromJob>[0])))}
           >
             {job.status === 'failed' && <p className="px-4 py-3 text-[13px] text-down">{job.error}</p>}
             {(job.status === 'queued' || job.status === 'running') && (
@@ -407,6 +344,14 @@ export default function Research() {
   const { data: me } = useMe()
   const [tab, setTab] = useState<'reports' | 'experiments' | 'stages' | 'shadow'>('reports')
   const owner = me?.role === 'owner'
+  // "Run again" refills the form; the key remounts it with the new settings
+  const [draft, setDraft] = useState<ReportDraft>(loadDraft)
+  const [formKey, setFormKey] = useState(0)
+  const runAgain = (d: ReportDraft) => {
+    setDraft(d)
+    setFormKey((k) => k + 1)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -424,8 +369,8 @@ export default function Research() {
       </div>
       {tab === 'reports' && (
         <>
-          {me?.role !== 'viewer' && <NewJob />}
-          <Jobs />
+          {me?.role !== 'viewer' && <ReportForm key={formKey} initial={draft} />}
+          <Jobs onRunAgain={me?.role !== 'viewer' ? runAgain : undefined} />
           <LegacyReports />
         </>
       )}

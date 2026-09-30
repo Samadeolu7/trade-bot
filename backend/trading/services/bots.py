@@ -29,14 +29,15 @@ def trade_bot_config() -> dict:
     return load_config(settings.TRADE_BOT_CONFIG_PATH)
 
 
-def strategy_defaults(name: str) -> dict[str, dict]:
-    """config.yaml's defaults for every section a strategy reads — what
-    the app shows as the bot's editable parameters."""
+def strategy_defaults(name: str, include_research: bool = False) -> dict[str, dict]:
+    """config.yaml's defaults for every section a strategy reads: what the
+    app shows as a bot's editable parameters, or with `include_research`,
+    what a research report can vary (research-only options included)."""
     strategy_config = trade_bot_config().get("strategy", {})
     return {
         s: copy.deepcopy(strategy_config.get(s, {}))
         for s in STRATEGY_CATALOG[name].config_sections
-        if s not in RESEARCH_ONLY_SECTIONS
+        if include_research or s not in RESEARCH_ONLY_SECTIONS
     }
 
 

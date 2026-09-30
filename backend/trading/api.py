@@ -512,10 +512,12 @@ class StrategyOut(Schema):
 
 
 @router.get("/strategies", response=list[StrategyOut])
-def list_strategies(request):
+def list_strategies(request, include_research: bool = False):
+    """`include_research`: also the research-only options (pyramiding), for
+    the research report form; bots can't use them."""
     return [
         {"name": s.name, "kind": s.kind, "can_short": s.can_short, "description": s.description,
-         "defaults": strategy_defaults(s.name)}
+         "defaults": strategy_defaults(s.name, include_research)}
         for s in STRATEGY_CATALOG.values()
     ]
 

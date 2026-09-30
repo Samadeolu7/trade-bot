@@ -835,7 +835,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Strategies */
+        /**
+         * List Strategies
+         * @description `include_research`: also the research-only options (pyramiding), for
+         *     the research report form; bots can't use them.
+         */
         get: operations["trading_api_list_strategies"];
         put?: never;
         post?: never;
@@ -3233,7 +3237,9 @@ export interface operations {
     };
     trading_api_list_strategies: {
         parameters: {
-            query?: never;
+            query?: {
+                include_research?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;

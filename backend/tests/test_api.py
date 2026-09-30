@@ -174,3 +174,12 @@ def test_30_day_change_ignores_deposits(account, owner, quotes):
     data = client.get(f"/api/accounts/{account.pk}").json()
     assert data["equity"] == 70_000.0
     assert data["change_30d"] == 0.0
+
+
+def test_research_form_sees_pyramiding_but_bot_form_does_not(owner):
+    client = Client()
+    login(client, "owner")
+    donchian = {s["name"]: s for s in client.get("/api/strategies").json()}["donchian"]
+    assert "pyramid" not in donchian["defaults"]
+    donchian = {s["name"]: s for s in client.get("/api/strategies?include_research=true").json()}["donchian"]
+    assert donchian["defaults"]["pyramid"] == {"max_adds": 0, "add_step_pct": 0.0}

@@ -5,7 +5,14 @@ on:
     branches: [master]
   workflow_dispatch:
 
+# two deploys at once race to replace the same containers on the server;
+# a second push waits for the running deploy instead
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/btc-trade-bot
   PLATFORM_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/trade-desk-platform
   FRONTEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/trade-desk-frontend
@@ -16,9 +23,9 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -33,7 +40,7 @@ jobs:
         working-directory: backend
         run: python -m pytest -q
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
@@ -68,7 +75,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -80,7 +87,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push bot image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
@@ -91,7 +98,7 @@ jobs:
           cache-to: type=inline
 
       - name: Build and push platform image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.platform
@@ -103,7 +110,7 @@ jobs:
           cache-to: type=inline
 
       - name: Build and push frontend image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: frontend
           push: true
@@ -119,7 +126,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Ensure target directory exists
         uses: appleboy/ssh-action@v1.0.3

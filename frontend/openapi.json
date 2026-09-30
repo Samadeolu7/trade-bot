@@ -5144,8 +5144,20 @@
     },
     "/api/strategies": {
       "get": {
+        "description": "`include_research`: also the research-only options (pyramiding), for\nthe research report form; bots can't use them.",
         "operationId": "trading_api_list_strategies",
-        "parameters": [],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_research",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Research",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
