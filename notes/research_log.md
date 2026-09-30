@@ -90,3 +90,13 @@ choice, not a finding.
   Quidax spot) isn't checked.
 
 Jobs used on this key: 21 of 30.
+
+## Batch 3 (pre-registered): reduce survivorship bias
+
+Key limit raised to 100 jobs. Same untuned ensemble config on a broader
+set: LTC, LINK, DOT, AVAX, ATOM, TRX, BCH, ETC, FIL, NEAR, XLM, UNI, plus two
+collapsed coins, LUNC (ex-LUNA) and FTT, if Binance still serves their
+history. **Rule:** the portfolio is judged on *every* coin with data, with no
+dropping of losers after the fact. If the broad equal-weight portfolio still
+beats BTC alone in both windows, the multi-coin result isn't just survivor
+picking. The holdout check comes only after this, on a fixed design.
