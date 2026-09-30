@@ -183,6 +183,55 @@ def create_job(request, payload: JobIn):
     return job
 
 
+class PortfolioJobIn(Schema):
+    timeframe: str = "4h"
+    # symbols the monthly universe is picked from; blank = the default pool
+    pool: list[str] = []
+    # universe sizes to compare (top N by trailing dollar volume)
+    sizes: list[int] = [10]
+    # single-value donchian_ensemble.* overrides
+    params: dict = {}
+
+
+@router.post("/portfolio-jobs", response=JobOut, auth=research_auth)
+def create_portfolio_job(request, payload: PortfolioJobIn):
+    """A rotational multi-coin donchian_ensemble backtest on the usual
+    train/test windows (holdout excluded)."""
+    from research.portfolio_jobs import validate_portfolio_params
+
+    key = getattr(request, "research_key", None)
+    if key is None:
+        if request.user.role == "viewer":
+            raise HttpError(403, "viewers can't start research jobs")
+        require_verified(request)
+    elif key.jobs_started >= key.max_jobs:
+        raise HttpError(429, f"this key has started its limit of {key.max_jobs} jobs; create a new one")
+    try:
+        params = validate_portfolio_params(payload.dict())
+    except JobError as exc:
+        raise HttpError(400, str(exc)) from exc
+    busy = ResearchJob.objects.filter(kind=ResearchJob.Kind.PORTFOLIO_REPORT, params=params,
+                                      status__in=[ResearchJob.Status.QUEUED, ResearchJob.Status.RUNNING]).first()
+    if busy:
+        raise HttpError(409, f"An identical portfolio job (#{busy.pk}) is already {busy.status}.")
+    done = ResearchJob.objects.filter(kind=ResearchJob.Kind.PORTFOLIO_REPORT, params=params,
+                                      status=ResearchJob.Status.DONE).order_by("-created_at").first()
+    if done and (done.result.get("header") or {}).get("code") == _code_version():
+        raise HttpError(409, f"Already run with exactly these settings on the current code (job #{done.pk}).")
+    job = ResearchJob.objects.create(kind=ResearchJob.Kind.PORTFOLIO_REPORT, params=params, created_by=request.user)
+    if key is not None:
+        ResearchApiKey.objects.filter(pk=key.pk).update(jobs_started=F("jobs_started") + 1)
+    audit("research.job", request=request, target=f"job:{job.pk}", params=params,
+          via_key=f"{key.name} ({key.prefix})" if key else "")
+    return job
+
+
+def _code_version() -> str:
+    from research.jobs import code_version
+
+    return code_version()
+
+
 class ApiKeyOut(Schema):
     id: int
     name: str

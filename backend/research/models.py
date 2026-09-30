@@ -62,6 +62,7 @@ class ResearchJob(models.Model):
     class Kind(models.TextChoices):
         BACKTEST = "backtest", "Backtest"
         RESEARCH_REPORT = "research_report", "Research report"
+        PORTFOLIO_REPORT = "portfolio_report", "Portfolio report"
 
     class Status(models.TextChoices):
         QUEUED = "queued", "Queued"

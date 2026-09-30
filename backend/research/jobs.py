@@ -311,7 +311,12 @@ def run_job(job: ResearchJob, fetch: bool = True) -> ResearchJob:
     job.started_at = timezone.now()
     job.save(update_fields=["status", "started_at"])
     try:
-        job.result = run_research_report(validate_params(job.kind, job.params), fetch=fetch, job=job)
+        if job.kind == ResearchJob.Kind.PORTFOLIO_REPORT:
+            from research.portfolio_jobs import run_portfolio_report, validate_portfolio_params
+
+            job.result = run_portfolio_report(validate_portfolio_params(job.params), fetch=fetch, job=job)
+        else:
+            job.result = run_research_report(validate_params(job.kind, job.params), fetch=fetch, job=job)
         job.status = ResearchJob.Status.DONE
     except Exception as exc:
         logger.exception("research job %s failed", job.pk)

@@ -210,3 +210,57 @@ def test_variants_differing_only_in_inert_pyramid_options_are_computed_once(owne
     assert same[0]["windows"] == first["windows"]
     # three distinct variants plus the baseline, two windows each
     assert Experiment.objects.filter(job=job).count() == 8
+
+
+def _coin(symbol, seed, volume, start=datetime(2018, 1, 1, tzinfo=timezone.utc), days=3000):
+    import numpy as np
+
+    from market.candles import upsert_candles
+
+    rng = np.random.default_rng(seed)
+    closes = 100 * np.exp(np.cumsum(rng.normal(0.0008, 0.03, days)))
+    rows = []
+    for i, c in enumerate(closes):
+        t = int((start.timestamp() + 86400 * i) * 1000)
+        rows.append([t, c, c, c, c, volume])
+    upsert_candles("binance", symbol, "1d", rows)
+
+
+def test_portfolio_job_runs_both_windows_and_never_touches_the_holdout(owner):
+    _coin("AAA/USDT", 1, 1e8)  # dollar volume = price x units; wide gaps so price drift can't reorder them
+    _coin("BBB/USDT", 2, 1e5)
+    _coin("CCC/USDT", 3, 1.0)
+    job = ResearchJob.objects.create(
+        kind="portfolio_report", created_by=owner,
+        params={"timeframe": "1d", "pool": ["AAA/USDT", "BBB/USDT", "CCC/USDT"], "sizes": [2]},
+    )
+    run_job(job, fetch=False)
+    job.refresh_from_db()
+    assert job.status == "done", job.error
+    run = job.result["runs"][0]
+    assert run["label"] == "top-2 rotational donchian_ensemble"
+    assert run["windows"]["train"] and run["windows"]["test"]
+    # the monthly universe is the two highest-volume coins
+    assert run["universe"]["test"]["2024-01"] == ["AAA/USDT", "BBB/USDT"]
+    holdout = trade_bot_config()["validation"]["holdout_start"][:10]
+    assert job.result["header"]["test"].split("..")[1][:10] < holdout
+    assert Experiment.objects.filter(job=job, symbol="PORTFOLIO").count() == 2
+
+
+def test_portfolio_api_validates_and_refuses_repeats(owner):
+    import json
+
+    from django.test import Client
+
+    client = Client()
+    client.force_login(owner)
+
+    def post(body):
+        return client.post("/api/research/portfolio-jobs", json.dumps(body), content_type="application/json")
+
+    assert post({"sizes": [0]}).status_code == 400
+    assert post({"params": {"donchian.channel_period": 30}}).status_code == 400
+    first = post({"sizes": [10]})
+    assert first.status_code == 200, first.content
+    again = post({"sizes": [10]})
+    assert again.status_code == 409 and "already queued" in again.json()["detail"]

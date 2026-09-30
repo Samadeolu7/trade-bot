@@ -69,6 +69,36 @@ def backfill_candles(
     return total
 
 
+def backfill_head(
+    exchange: ccxt.Exchange, exchange_id: str, symbol: str, timeframe: str, start_date: str, limit: int = 1000
+) -> int:
+    """Fills history *before* the earliest stored candle, back to
+    `start_date`. backfill_candles only moves forward, so a symbol first
+    fetched from 2020 would otherwise never get its 2018–2019 history.
+    Stops at whatever the exchange has: a coin listed later just starts
+    later."""
+    earliest = (
+        Candle.objects.filter(exchange=exchange_id, symbol=symbol, timeframe=timeframe)
+        .order_by("open_time").values_list("open_time", flat=True).first()
+    )
+    if earliest is None:
+        return 0  # nothing stored yet: backfill_candles fetches from start_date anyway
+    since = ccxt.Exchange.parse8601(start_date)
+    stop = _dt_to_ms(earliest)
+    timeframe_ms = exchange.parse_timeframe(timeframe) * 1000
+    total = 0
+    while since < stop:
+        rows = [r for r in fetch_ohlcv(exchange, symbol, timeframe, since=since, limit=limit) if r[0] < stop]
+        if not rows:
+            break
+        total += upsert_candles(exchange_id, symbol, timeframe, rows)
+        next_since = rows[-1][0] + timeframe_ms
+        if next_since <= since:
+            break
+        since = next_since
+    return total
+
+
 def backfill_funding(exchange_id: str, symbol: str, start_date: str) -> int:
     exchange = create_funding_exchange(exchange_id)
     since = ccxt.Exchange.parse8601(start_date)
