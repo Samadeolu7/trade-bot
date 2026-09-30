@@ -124,3 +124,42 @@ Sharpe falls below BTC alone. 2024–26 was an altcoin bear, and the ensemble
 limited the damage but couldn't profit. Next: point-in-time universes (top
 coins by market cap at each window's start, the paper's method), which
 removes the survivor pick. Adding EOS and XTZ (top-10 in Jan 2020).
+
+**Point-in-time universes and strategy blends (jobs 36–37 add EOS, XTZ).**
+
+**Correction to my own analysis:** the earlier portfolio figures put each
+job's downsampled equity curve on a *daily* grid. Different jobs' curves
+have points on different days (e.g. donchian starts 9 days into a window,
+after its warmup), so on a daily grid their moves never coincide. That
+faked near-zero correlation and inflated every blend's Sharpe. All figures
+below use weekly closes, where every series has real values.
+
+| Weekly, aligned | Train Sharpe | Test return / DD / Sharpe |
+|---|---|---|
+| **BTC ensemble alone** | 1.21 | +32.5% / -9.9% / 0.92 |
+| original 7 (survivor-picked) | 1.64 | +30.1% / -6.8% / 1.04 |
+| all 23 coins | 1.41 | +15.7% / -7.3% / 0.70 |
+| top-10 by market cap at window start (no survivorship) | 0.98 | +27.3% / -6.5% / 0.99 |
+| BTC+ETH ensemble 50/50 | 1.34 | +24.3% / -9.3% / 0.84 |
+| ensemble + donchian on BTC+ETH, inverse-vol weights from train | 1.27 | +14.3% / -5.5% / 0.93 |
+
+Ensemble vs donchian return correlation on BTC: 0.61 train, 0.51 test.
+
+**Conclusion of this search (37 of 100 key jobs used):** once survivorship
+and the alignment artifact are removed, nothing beats the BTC ensemble
+alone on risk-adjusted return in *both* windows by a meaningful margin.
+- The point-in-time top-10 is worse on train (0.98 vs 1.21) and only
+  marginally better on test.
+- BTC+ETH is better on train and worse on test.
+- Blends mainly lower risk and return together.
+
+The BTC 4h ensemble, already paper-traded, in the recommend feed and
+holdout-checked (thin pass), stays the best strategy found. Because the
+multi-coin design was dropped, the planned altcoin holdout check isn't
+run: it would validate a design that isn't being adopted.
+
+**The one faithful version still untested** is the paper's actual portfolio:
+a universe re-selected monthly by trailing volume (top-20 coins with
+≥$2M median 30-day volume, point-in-time), ensemble per coin, rotated.
+It needs a multi-asset backtester (new code), since the research API
+tests one symbol at a time.
