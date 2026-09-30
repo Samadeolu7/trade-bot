@@ -2,6 +2,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
+from django.utils import timezone
 from ninja import Router, Schema
 from ninja.errors import HttpError
 
@@ -134,12 +135,34 @@ class EventOut(Schema):
     title: str
     body: str
     delivered: bool
+    dismissed_at: datetime | None
     created_at: datetime
 
 
 @router.get("/events", response=list[EventOut])
-def list_events(request, limit: int = 100):
-    return list(AlertEvent.objects.filter(user=request.user)[: min(limit, 500)])
+def list_events(request, limit: int = 100, active: bool = False):
+    """`active`: only alerts not yet dismissed, the ones the app keeps on screen."""
+    events = AlertEvent.objects.filter(user=request.user)
+    if active:
+        events = events.filter(dismissed_at__isnull=True)
+    return list(events[: min(limit, 500)])
+
+
+@router.post("/events/{event_id}/dismiss", response=EventOut)
+def dismiss(request, event_id: int):
+    event = AlertEvent.objects.filter(pk=event_id, user=request.user).first()
+    if event is None:
+        raise HttpError(404, "no such alert")
+    if event.dismissed_at is None:
+        event.dismissed_at = timezone.now()
+        event.save(update_fields=["dismissed_at"])
+    return event
+
+
+@router.post("/events/dismiss-all")
+def dismiss_all(request):
+    count = AlertEvent.objects.filter(user=request.user, dismissed_at__isnull=True).update(dismissed_at=timezone.now())
+    return {"dismissed": count}
 
 
 class TelegramOut(Schema):

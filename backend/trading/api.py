@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
+from django.db.models import Sum
 from django.utils import timezone
 from ninja import Router, Schema
 from ninja.errors import HttpError
@@ -150,6 +151,9 @@ class AccountOut(Schema):
     halted_reason: str
     can_trade: bool
     equity: float | None
+    # trading result over the last 30 days: the equity change less money
+    # deposited or withdrawn in that time
+    change_30d: float | None
     cash: float
     books: list[BookOut]
     created_at: datetime
@@ -174,8 +178,18 @@ def _account_out(account: TradingAccount, user) -> dict:
             "balances": {k: float(v) for k, v in balances.items() if v},
             "equity": float(value) if priced else None,
         })
+    change = None
+    start = (EquitySnapshot.objects.filter(account=account, book="", time__gte=timezone.now() - timedelta(days=30))
+             .order_by("time").first())
+    if start is not None and priced:
+        flows = LedgerEntry.objects.filter(
+            account=account, created_at__gt=start.time, asset=account.quote_asset,
+            kind__in=[LedgerEntry.Kind.DEPOSIT, LedgerEntry.Kind.WITHDRAWAL],
+        ).aggregate(total=Sum("amount"))["total"] or ZERO
+        change = float(total - start.equity - flows)
     return {
         "id": account.pk, "name": account.name, "mode": account.mode, "venue": _venue_out(account.venue_profile),
+        "change_30d": change,
         "is_active": account.is_active, "halted": account.halted, "halted_reason": account.halted_reason,
         "can_trade": can_trade_account(user, account), "equity": float(total) if priced else None,
         "cash": float(cash), "books": book_rows, "created_at": account.created_at,

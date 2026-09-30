@@ -99,4 +99,7 @@ jobs:
                 --strategy "$s" --symbol "$SYMBOL" --timeframe "$TIMEFRAME" --baseline "$BASELINE" $PARAMS $extra \
                 || failed="$failed $s"
             done
+            # the CLI writes to its own SQLite database; copy the new
+            # experiment rows into the web app so the report shows there too
+            docker compose exec -T platform-web python manage.py import_sqlite /legacy/trades.db --only-experiments               || echo "warning: couldn't copy the results into the app"
             if [ -n "$failed" ]; then echo "FAILED:$failed"; exit 1; fi

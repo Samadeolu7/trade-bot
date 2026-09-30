@@ -49,6 +49,8 @@ const statusTone: Record<string, string> = {
   pending: 'text-ink-2',
   cancelled: 'text-muted',
   rejected: 'text-down',
+  queued: 'text-ink-2',
+  failed: 'text-down',
 }
 
 const statusIcon: Record<string, string> = {

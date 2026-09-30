@@ -114,10 +114,47 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Events */
+        /**
+         * List Events
+         * @description `active`: only alerts not yet dismissed, the ones the app keeps on screen.
+         */
         get: operations["alerts_api_list_events"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/alerts/events/dismiss-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Dismiss All */
+        post: operations["alerts_api_dismiss_all"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/alerts/events/{event_id}/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Dismiss */
+        post: operations["alerts_api_dismiss"];
         delete?: never;
         options?: never;
         head?: never;
@@ -667,6 +704,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/research/legacy-reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Legacy Reports
+         * @description Reports run by the CLI (the Research Report workflow), rebuilt from
+         *     their experiment rows.
+         */
+        get: operations["research_api_list_legacy_reports"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/research/lifecycle": {
         parameters: {
             query?: never;
@@ -840,6 +898,8 @@ export interface components {
             can_trade: boolean;
             /** Cash */
             cash: number;
+            /** Change 30D */
+            change_30d: number | null;
             /**
              * Created At
              * Format: date-time
@@ -1068,6 +1128,8 @@ export interface components {
             created_at: string;
             /** Delivered */
             delivered: boolean;
+            /** Dismissed At */
+            dismissed_at: string | null;
             /** Id */
             id: number;
             /** Kind */
@@ -1281,6 +1343,26 @@ export interface components {
             note: string;
             /** Order Id */
             order_id: number | null;
+        };
+        /** LegacyReportOut */
+        LegacyReportOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Header */
+            header: {
+                [key: string]: unknown;
+            };
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Runs */
+            runs: {
+                [key: string]: unknown;
+            }[];
         };
         /** LifecycleIn */
         LifecycleIn: {
@@ -1980,6 +2062,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                active?: boolean;
             };
             header?: never;
             path?: never;
@@ -1994,6 +2077,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EventOut"][];
+                };
+            };
+        };
+    };
+    alerts_api_dismiss_all: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    alerts_api_dismiss: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventOut"];
                 };
             };
         };
@@ -2843,6 +2966,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobOut"];
+                };
+            };
+        };
+    };
+    research_api_list_legacy_reports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacyReportOut"][];
                 };
             };
         };

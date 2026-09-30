@@ -35,10 +35,17 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("path", nargs="?", default="/legacy/trades.db")
         parser.add_argument("--skip-candles", action="store_true")
+        parser.add_argument("--only-experiments", action="store_true",
+                            help="just the experiment log, e.g. after a Research Report workflow run")
 
-    def handle(self, *args, path, skip_candles=False, **options):
+    def handle(self, *args, path, skip_candles=False, only_experiments=False, **options):
         conn = open_legacy_db(path)
         report = []
+        if only_experiments:
+            self._experiments(conn, report)
+            for line in report:
+                self.stdout.write(line)
+            return
 
         if not skip_candles and _has_table(conn, "candles"):
             series = conn.execute("SELECT DISTINCT exchange, symbol, timeframe FROM candles").fetchall()
@@ -60,24 +67,7 @@ class Command(BaseCommand):
             )
             report.append(f"funding rates: {len(rows)}")
 
-        if _has_table(conn, "experiments"):
-            rows = conn.execute(
-                "SELECT id, created_at, kind, strategy, strategy_label, symbol, timeframe, window_start, "
-                "window_end, touched_holdout, config_json, config_hash, data_version, code_commit, "
-                "result_json, decision, decision_reason FROM experiments"
-            ).fetchall()
-            for r in rows:
-                Experiment.objects.update_or_create(
-                    source_id=r[0],
-                    defaults=dict(
-                        created_at=_dt(r[1]), kind=r[2], strategy=r[3], strategy_label=r[4], symbol=r[5],
-                        timeframe=r[6], window_start=r[7] or "", window_end=r[8] or "",
-                        touched_holdout=bool(r[9]), config=_json(r[10]), config_hash=r[11],
-                        data_version=r[12] or "", git_commit=r[13] or "", result=_json(r[14]),
-                        decision=r[15] or "", decision_reason=r[16] or "",
-                    ),
-                )
-            report.append(f"experiments: {len(rows)}")
+        self._experiments(conn, report)
 
         if _has_table(conn, "bot_state"):
             rows = conn.execute("SELECT key, value FROM bot_state WHERE key LIKE 'lifecycle:%'").fetchall()
@@ -114,3 +104,24 @@ class Command(BaseCommand):
 
         for line in report:
             self.stdout.write(line)
+
+    def _experiments(self, conn, report):
+        if not _has_table(conn, "experiments"):
+            return
+        rows = conn.execute(
+            "SELECT id, created_at, kind, strategy, strategy_label, symbol, timeframe, window_start, "
+            "window_end, touched_holdout, config_json, config_hash, data_version, code_commit, "
+            "result_json, decision, decision_reason FROM experiments"
+        ).fetchall()
+        for r in rows:
+            Experiment.objects.update_or_create(
+                source_id=r[0],
+                defaults=dict(
+                    created_at=_dt(r[1]), kind=r[2], strategy=r[3], strategy_label=r[4], symbol=r[5],
+                    timeframe=r[6], window_start=r[7] or "", window_end=r[8] or "",
+                    touched_holdout=bool(r[9]), config=_json(r[10]), config_hash=r[11],
+                    data_version=r[12] or "", git_commit=r[13] or "", result=_json(r[14]),
+                    decision=r[15] or "", decision_reason=r[16] or "",
+                ),
+            )
+        report.append(f"experiments: {len(rows)}")

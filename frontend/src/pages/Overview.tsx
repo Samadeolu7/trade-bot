@@ -8,10 +8,9 @@ import { ago, money, signed, tone } from '../lib/format'
 
 function Headline() {
   const { account } = useSelectedAccount()
-  const { data: equity } = useEquity(account?.id, '', 30)
   if (!account) return null
-  const first = equity?.[0]?.equity
-  const change = first != null && account.equity != null ? account.equity - first : null
+  // trading result only: deposits and withdrawals are taken out server-side
+  const change = account.change_30d
   return (
     <div className="flex flex-wrap items-end gap-x-10 gap-y-3">
       <div>
@@ -21,7 +20,7 @@ function Headline() {
         </div>
       </div>
       <div>
-        <div className="text-[13px] text-muted">30 days</div>
+        <div className="text-[13px] text-muted">Last 30 days</div>
         <div className={`num text-[18px] font-semibold ${tone(change)}`}>{signed(change)}</div>
       </div>
       <div>

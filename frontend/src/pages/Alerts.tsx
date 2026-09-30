@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { client, unwrap, type Schemas } from '../api/client'
 import { useBots } from '../api/hooks'
 import { Button, Empty, ErrorText, Field, Panel, Tabs, inputClass } from '../components/ui'
@@ -227,6 +228,12 @@ function Rules() {
 }
 
 function Log() {
+  const qc = useQueryClient()
+  const dismiss = useMutation({
+    mutationFn: (id: number) =>
+      unwrap(client.POST('/api/alerts/events/{event_id}/dismiss', { params: { path: { event_id: id } } })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['alerts'] }),
+  })
   const { data } = useQuery({
     queryKey: keys.events,
     queryFn: () => unwrap(client.GET('/api/alerts/events', { params: { query: { limit: 200 } } })),
@@ -239,7 +246,14 @@ function Log() {
         <li key={e.id} className="px-4 py-3">
           <div className="flex justify-between gap-4">
             <span className="font-medium">{e.title}</span>
-            <span className="num shrink-0 text-[12px] text-muted">{dateTime(e.created_at)}</span>
+            <span className="flex shrink-0 items-center gap-2">
+              <span className="num text-[12px] text-muted">{dateTime(e.created_at)}</span>
+              {!e.dismissed_at && (
+                <Button size="sm" onClick={() => dismiss.mutate(e.id)}>
+                  Dismiss
+                </Button>
+              )}
+            </span>
           </div>
           {e.body && <p className="mt-0.5 whitespace-pre-line text-[13px] text-ink-2">{e.body}</p>}
           {!e.delivered && <p className="mt-0.5 text-[12px] text-muted">Not sent to Telegram</p>}
@@ -292,7 +306,8 @@ export function TelegramSettings() {
 }
 
 export default function Alerts() {
-  const [tab, setTab] = useState<'rules' | 'log'>('rules')
+  const [params] = useSearchParams()
+  const [tab, setTab] = useState<'rules' | 'log'>(params.get('tab') === 'log' ? 'log' : 'rules')
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">

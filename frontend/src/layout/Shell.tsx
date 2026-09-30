@@ -6,7 +6,7 @@ import { ModeBadge } from '../components/ui'
 import { useSelectedAccount } from '../lib/account'
 import { ago, money } from '../lib/format'
 import { marketGroup, useLive } from '../lib/live'
-import { Toasts } from '../lib/toast'
+import { AlertBell, Toasts } from '../lib/toast'
 
 const NAV = [
   { to: '/', label: 'Overview', icon: 'M3 12l9-8 9 8M5 10v10h14V10' },
@@ -110,6 +110,7 @@ export default function Shell() {
           <AccountSwitcher />
           <div className="flex items-center gap-4">
             <EngineHealth />
+            <AlertBell />
             {!live && <span className="hidden text-[12px] text-muted lg:inline">Updates every few seconds</span>}
             <details className="relative">
               <summary className="cursor-pointer list-none text-[13px] text-ink-2 hover:text-ink">{me?.username}</summary>

@@ -52,6 +52,8 @@ class AlertEvent(models.Model):
     title = models.CharField(max_length=200)
     body = models.TextField(blank=True)
     delivered = models.BooleanField(default=False)
+    # alerts stay on screen in the app until the person dismisses them
+    dismissed_at = models.DateTimeField(null=True, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:

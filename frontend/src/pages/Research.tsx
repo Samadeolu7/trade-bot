@@ -1,5 +1,5 @@
-import { useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState, type ReactNode } from 'react'
 import { client, unwrap } from '../api/client'
 import { keys, useExperiments, useJobs, useLifecycle, useMe, useStrategies } from '../api/hooks'
 import ShadowHistory from '../components/ShadowHistory'
@@ -46,12 +46,15 @@ function RunTable({ runs }: { runs: Run[] }) {
         </thead>
         <tbody>
           {runs.flatMap((run) =>
-            (['train', 'test'] as const).map((w) => {
+            (['train', 'test', 'holdout'] as const)
+              .filter((w) => w !== 'holdout' || run.windows.holdout !== undefined)
+              .filter((w) => w === 'holdout' || run.windows.holdout === undefined)
+              .map((w, i) => {
               const s = run.windows[w]
               return (
-                <tr key={`${run.label}-${w}`} className={w === 'test' ? '' : 'text-ink-2'}>
-                  <td className={run.baseline ? 'text-muted' : 'font-semibold'}>{w === 'train' ? run.label : ''}</td>
-                  <td>{w === 'test' ? 'Test (judge on this)' : 'Train'}</td>
+                <tr key={`${run.label}-${w}`} className={w === 'train' ? 'text-ink-2' : ''}>
+                  <td className={run.baseline ? 'text-muted' : 'font-semibold'}>{i === 0 ? run.label : ''}</td>
+                  <td>{w === 'test' ? 'Test (judge on this)' : w === 'holdout' ? 'Holdout' : 'Train'}</td>
                   <td className="num r">{n(s?.total_return_pct, '%')}</td>
                   <td className="num r">{n(s?.max_drawdown_pct, '%')}</td>
                   <td className="num r">{n(s?.sharpe_ratio)}</td>
@@ -141,36 +144,73 @@ function NewJob() {
   )
 }
 
+function ReportPanel({
+  title,
+  subtitle,
+  when,
+  status,
+  defaultOpen,
+  children,
+}: {
+  title: ReactNode
+  subtitle?: ReactNode
+  when: string
+  status?: string
+  defaultOpen: boolean
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <Panel
+      flush
+      title={
+        <span>
+          {title}
+          {subtitle && <span className="ml-2 text-[13px] font-normal text-ink-2">{subtitle}</span>}
+        </span>
+      }
+      actions={
+        <span className="flex items-center gap-3 text-[13px] text-ink-2">
+          {dateTime(when)}
+          {status && status !== 'done' && <Status value={status} />}
+          {(!status || status === 'done') && (
+            <Button size="sm" onClick={() => setOpen(!open)} aria-expanded={open}>
+              {open ? 'Hide results' : 'Show results'}
+            </Button>
+          )}
+        </span>
+      }
+    >
+      {(open || (status && status !== 'done')) && children}
+    </Panel>
+  )
+}
+
 function Jobs() {
   const { data } = useJobs()
-  const [open, setOpen] = useState<number | null>(null)
-  if (!data?.length) return <Empty>No reports yet.</Empty>
+  if (!data?.length) return <Empty>No reports run from the app yet.</Empty>
   return (
     <div className="space-y-3">
-      {data.map((job) => {
+      {data.map((job, index) => {
         const runs = (job.result as { runs?: Run[] }).runs ?? []
         const header = (job.result as { header?: Record<string, string> }).header
         const params = job.params as { strategy: string; timeframe: string; params: Record<string, unknown[]> }
         return (
-          <Panel
+          <ReportPanel
             key={job.id}
-            flush
-            title={
-              <button className="text-left" onClick={() => setOpen(open === job.id ? null : job.id)} aria-expanded={open === job.id}>
-                {params.strategy} on {params.timeframe}
-                {Object.keys(params.params ?? {}).length > 0 && (
-                  <span className="ml-2 text-[13px] font-normal text-ink-2">{Object.keys(params.params).join(', ')}</span>
-                )}
-              </button>
-            }
-            actions={
-              <span className="flex items-center gap-3 text-[13px] text-ink-2">
-                {dateTime(job.created_at)} <Status value={job.status === 'done' ? 'filled' : job.status} />
-              </span>
-            }
+            title={`${params.strategy} on ${params.timeframe}`}
+            subtitle={Object.keys(params.params ?? {}).join(', ')}
+            when={job.created_at}
+            status={job.status}
+            defaultOpen={index === 0}
           >
             {job.status === 'failed' && <p className="px-4 py-3 text-[13px] text-down">{job.error}</p>}
-            {job.status === 'done' && (open === job.id || data[0].id === job.id) && (
+            {(job.status === 'queued' || job.status === 'running') && (
+              <p className="px-4 py-3 text-[13px] text-ink-2">
+                {job.status === 'queued' ? 'Waiting for the research worker.' : 'Running; this can take a few minutes.'}
+              </p>
+            )}
+            {job.status === 'done' && (
               <div className="space-y-3 pb-3">
                 {header && (
                   <p className="px-4 pt-3 text-[12px] text-muted">
@@ -194,7 +234,36 @@ function Jobs() {
                 </div>
               </div>
             )}
-          </Panel>
+          </ReportPanel>
+        )
+      })}
+    </div>
+  )
+}
+
+function LegacyReports() {
+  const { data } = useQuery({
+    queryKey: ['research', 'legacy-reports'],
+    queryFn: () => unwrap(client.GET('/api/research/legacy-reports')),
+  })
+  if (!data?.length) return null
+  return (
+    <div className="space-y-3">
+      <h2 className="pt-2 text-[15px] font-semibold">Reports from the Research Report workflow</h2>
+      {data.map((report) => {
+        const header = report.header as { strategy: string; timeframe: string; symbol: string }
+        return (
+          <ReportPanel
+            key={report.id}
+            title={`${header.strategy} on ${header.timeframe}`}
+            subtitle={report.kind === 'holdout_check' ? 'holdout check' : undefined}
+            when={report.created_at}
+            defaultOpen={false}
+          >
+            <div className="pb-3">
+              <RunTable runs={report.runs as unknown as Run[]} />
+            </div>
+          </ReportPanel>
         )
       })}
     </div>
@@ -357,6 +426,7 @@ export default function Research() {
         <>
           {me?.role !== 'viewer' && <NewJob />}
           <Jobs />
+          <LegacyReports />
         </>
       )}
       {tab === 'experiments' && <Experiments owner={owner} />}

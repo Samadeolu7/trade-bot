@@ -7,6 +7,7 @@ from ninja.errors import HttpError
 from bot.research.lifecycle import STAGES
 from core.audit import audit
 from research.jobs import JobError, validate_params
+from research.legacy_reports import legacy_reports
 from research.models import Experiment, ResearchJob, ShadowRebalance, ShadowTrade, StrategyLifecycle
 from trading.permissions import require_owner, require_verified
 
@@ -198,4 +199,18 @@ def shadow_history(request, strategy_label: str | None = None):
         rebalances = rebalances.filter(strategy_label=strategy_label)
     return {"trades": list(trades[:1000]), "rebalances": list(rebalances[:1000])}
 
+
+class LegacyReportOut(Schema):
+    id: int
+    created_at: datetime
+    kind: str
+    header: dict
+    runs: list[dict]
+
+
+@router.get("/legacy-reports", response=list[LegacyReportOut])
+def list_legacy_reports(request):
+    """Reports run by the CLI (the Research Report workflow), rebuilt from
+    their experiment rows."""
+    return legacy_reports()
 

@@ -54,6 +54,17 @@
             "title": "Cash",
             "type": "number"
           },
+          "change_30d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change 30D"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -108,6 +119,7 @@
           "halted_reason",
           "can_trade",
           "equity",
+          "change_30d",
           "cash",
           "books",
           "created_at"
@@ -645,6 +657,18 @@
             "title": "Delivered",
             "type": "boolean"
           },
+          "dismissed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dismissed At"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -664,6 +688,7 @@
           "title",
           "body",
           "delivered",
+          "dismissed_at",
           "created_at"
         ],
         "title": "EventOut",
@@ -1204,6 +1229,45 @@
           "note"
         ],
         "title": "LedgerOut",
+        "type": "object"
+      },
+      "LegacyReportOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "header": {
+            "additionalProperties": true,
+            "title": "Header",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "runs": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Runs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "kind",
+          "header",
+          "runs"
+        ],
+        "title": "LegacyReportOut",
         "type": "object"
       },
       "LifecycleIn": {
@@ -2964,6 +3028,7 @@
     },
     "/api/alerts/events": {
       "get": {
+        "description": "`active`: only alerts not yet dismissed, the ones the app keeps on screen.",
         "operationId": "alerts_api_list_events",
         "parameters": [
           {
@@ -2974,6 +3039,16 @@
               "default": 100,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "active",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Active",
+              "type": "boolean"
             }
           }
         ],
@@ -2999,6 +3074,63 @@
           }
         ],
         "summary": "List Events",
+        "tags": [
+          "alerts"
+        ]
+      }
+    },
+    "/api/alerts/events/dismiss-all": {
+      "post": {
+        "operationId": "alerts_api_dismiss_all",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "Dismiss All",
+        "tags": [
+          "alerts"
+        ]
+      }
+    },
+    "/api/alerts/events/{event_id}/dismiss": {
+      "post": {
+        "operationId": "alerts_api_dismiss",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "Dismiss",
         "tags": [
           "alerts"
         ]
@@ -4692,6 +4824,38 @@
           }
         ],
         "summary": "Get Job",
+        "tags": [
+          "research"
+        ]
+      }
+    },
+    "/api/research/legacy-reports": {
+      "get": {
+        "description": "Reports run by the CLI (the Research Report workflow), rebuilt from\ntheir experiment rows.",
+        "operationId": "research_api_list_legacy_reports",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LegacyReportOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "List Legacy Reports",
         "tags": [
           "research"
         ]

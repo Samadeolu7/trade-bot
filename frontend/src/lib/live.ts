@@ -1,7 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { keys } from '../api/hooks'
-import { toast } from './toast'
 
 type Push = { event: string; data: Record<string, unknown> }
 
@@ -48,8 +47,7 @@ export function useLive(groups: string[]): boolean {
           return
         }
         if (push.event === 'alert') {
-          const d = push.data as { title: string; body?: string }
-          toast(d.title, d.body)
+          // the alert tray shows it until it's dismissed
           qc.invalidateQueries({ queryKey: ['alerts'] })
           return
         }

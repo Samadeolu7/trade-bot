@@ -156,3 +156,21 @@ def test_create_bot_and_read_it_back(account, owner):
     bad = post(client, "/api/bots", {"account_id": account.pk, "name": "x", "strategy": "donchian",
                                      "allocation": "10", "params": {"rsi_bb.bb_std": 3}})
     assert bad.status_code == 400
+
+
+def test_30_day_change_ignores_deposits(account, owner, quotes):
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from trading.models import EquitySnapshot
+    from trading.services.orders import fund_paper_account
+
+    EquitySnapshot.objects.create(account=account, book="", time=timezone.now(),
+                                  equity=Decimal(10_000))
+    fund_paper_account(account, 60_000)
+    client = Client()
+    login(client, "owner")
+    data = client.get(f"/api/accounts/{account.pk}").json()
+    assert data["equity"] == 70_000.0
+    assert data["change_30d"] == 0.0

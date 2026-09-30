@@ -117,3 +117,23 @@ def test_alerts_api_defaults_and_toggle(owner):
     assert response.status_code == 200 and response.json()["enabled"] is False
     assert client.post("/api/alerts/rules", json.dumps({"kind": "price_above", "params": {}}),
                        content_type="application/json").status_code == 400
+
+
+def test_alerts_stay_until_dismissed(owner):
+    import json
+
+    from django.test import Client
+
+    AlertRule.objects.create(user=owner, kind="research_done")
+    notify("research_done", "Report one")
+    notify("research_done", "Report two")
+    client = Client()
+    client.post("/api/auth/login", json.dumps({"username": "owner", "password": "correct-horse-battery"}),
+                content_type="application/json")
+    active = client.get("/api/alerts/events?active=true").json()
+    assert len(active) == 2
+    client.post(f"/api/alerts/events/{active[0]['id']}/dismiss")
+    assert len(client.get("/api/alerts/events?active=true").json()) == 1
+    client.post("/api/alerts/events/dismiss-all")
+    assert client.get("/api/alerts/events?active=true").json() == []
+    assert len(client.get("/api/alerts/events").json()) == 2  # still in the log

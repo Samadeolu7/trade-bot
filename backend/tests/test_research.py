@@ -46,3 +46,37 @@ def test_pyramiding_is_a_research_option_but_not_a_bot_option(account, owner):
     with pytest.raises(OrderError, match="research-only"):
         create_bot(account, name="p", strategy="donchian", allocation=100, user=owner,
                    params={"pyramid.max_adds": 2})
+
+
+def test_cli_reports_are_rebuilt_from_their_experiment_rows():
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from research.legacy_reports import legacy_reports
+
+    t0 = timezone.now() - timedelta(days=2)
+    source = iter(range(1, 100))
+
+    def row(strategy, config, window_start, seconds, kind="research_report"):
+        Experiment.objects.create(
+            created_at=t0 + timedelta(seconds=seconds), kind=kind, strategy=strategy, strategy_label=strategy,
+            symbol="BTC/USDT", timeframe="4h", window_start=window_start, config=config,
+            config_hash=str(hash(str(config)))[:12], result={"total_return_pct": seconds}, source_id=next(source),
+        )
+
+    a = {"donchian": {"channel_period": 20, "long_only": 0}}
+    b = {"donchian": {"channel_period": 20, "long_only": 1}}
+    row("donchian", a, "2020-01-01", 0)
+    row("donchian", a, "2024-01-01", 5)
+    row("donchian", b, "2020-01-01", 10)
+    row("donchian", b, "2024-01-01", 15)
+    row("donchian_ensemble", {"donchian_ensemble": {}}, "2020-01-01", 20)  # baseline
+    row("donchian_ensemble", {"donchian_ensemble": {}}, "2026-03-01", 3600, kind="holdout_check")
+
+    reports = legacy_reports()
+    assert [r["kind"] for r in reports] == ["holdout_check", "research_report"]
+    runs = reports[1]["runs"]
+    assert [r["label"] for r in runs] == ["donchian long_only=0", "donchian long_only=1", "baseline: donchian_ensemble"]
+    assert set(runs[0]["windows"]) == {"train", "test"}
+    assert set(reports[0]["runs"][0]["windows"]) == {"holdout"}
