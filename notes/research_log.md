@@ -198,3 +198,35 @@ as a choice.
 (train 1.45, test 0.90, same summarize() metric) in **both** windows, with
 test max drawdown no worse than -20%. A pass makes it a candidate for a
 paper run. The holdout stays untouched until then.
+
+### Result (job 38, appended after the run; criteria above unchanged)
+
+All 27 coins had usable history. The monthly universes look right: FTT
+and LUNC entered the top-20 while they were liquid, and the Jan-2020 top-10
+included EOS, VET and ETC.
+
+| Rotational ensemble (4h) | Train return / DD / Sharpe | Test return / DD / Sharpe | Avg exposure (train / test) |
+|---|---|---|---|
+| top-5 (sensitivity) | +74.4% / -13.7% / 1.39 | +18.3% / -8.7% / 0.79 | 11% / 14% |
+| **top-10 (primary)** | +68.2% / -14.7% / **1.46** | +17.2% / -8.0% / **0.83** | 9% / 12% |
+| top-20 (sensitivity) | +47.9% / -11.1% / 1.35 | +13.8% / -7.7% / 0.77 | 7% / 9% |
+| BTC ensemble alone (bar) | +128.5% / -17.4% / 1.45 | +30.8% / -12.1% / 0.90 | |
+
+**Primary: FAIL.** Train Sharpe 1.46 vs 1.45 is a tie. Test Sharpe 0.83 is
+below BTC-alone's 0.90. Drawdown is fine (-8.0%), but that's not enough on
+its own. The sensitivity sizes fail the same way (test 0.77–0.79), so the
+result isn't a quirk of N = 10. The low average exposure (~10%) comes from
+N slots × per-coin vol targeting. It lowers return and drawdown together
+and doesn't change the Sharpe comparison.
+
+**Conclusion of the whole search:** four different ways of adding coins all
+fail to beat the BTC 4h ensemble alone on risk-adjusted return in both
+windows once survivorship is removed:
+- survivor-picked 7 (flattered),
+- all 23 equal-weight,
+- point-in-time top-10 by market cap,
+- the paper's monthly volume-rotated portfolio.
+
+Neither do strategy blends. The multi-coin versions reliably *lower
+drawdown*, but at a lower Sharpe in 2024–26, when altcoins were in a bear
+market relative to BTC. The BTC 4h ensemble stays the recommended strategy.
