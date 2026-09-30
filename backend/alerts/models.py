@@ -12,6 +12,8 @@ class AlertRule(models.Model):
         PRICE_ABOVE = "price_above", "Price crosses above"
         PRICE_BELOW = "price_below", "Price crosses below"
         PRICE_MOVE = "price_move", "Sudden move"
+        RECOMMENDATION = "recommendation", "MT5 recommendations"
+        NEAR_MISS = "near_miss", "Near misses"
         BOT_TRADE = "bot_trade", "Bot trades"
         STOP_HIT = "stop_hit", "Stop or take profit hit"
         BOT_ERROR = "bot_error", "Bot or engine problem"

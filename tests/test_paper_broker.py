@@ -145,3 +145,22 @@ def test_round_trip_costs_money(venue):
     balances = broker.get_balances()
     assert balances.get("BTC", D(0)) == 0
     assert balances["USDT"] < D(10_000)
+
+
+def test_fallback_skips_a_failing_source_for_a_while():
+    from bot.broker.base import BrokerError
+    from bot.broker.quotes import FallbackQuoteSource
+
+    class Failing:
+        calls = 0
+
+        def quote(self, symbol):
+            Failing.calls += 1
+            raise BrokerError("down")
+
+    backup = StaticQuoteSource()
+    backup.set(SYMBOL, 100, 102)
+    source = FallbackQuoteSource([Failing(), backup])
+    assert source.quote(SYMBOL).mid == D(101)
+    assert source.quote(SYMBOL).mid == D(101)
+    assert Failing.calls == 1

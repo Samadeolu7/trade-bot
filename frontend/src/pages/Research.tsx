@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { client, unwrap } from '../api/client'
 import { keys, useExperiments, useJobs, useLifecycle, useMe, useStrategies } from '../api/hooks'
+import ShadowHistory from '../components/ShadowHistory'
 import { EquityChart } from '../components/charts'
 import { Button, Empty, ErrorText, Field, Panel, Status, Tabs, inputClass } from '../components/ui'
 import { dateTime, titleCase } from '../lib/format'
@@ -331,7 +332,7 @@ function Lifecycle({ owner }: { owner: boolean }) {
 
 export default function Research() {
   const { data: me } = useMe()
-  const [tab, setTab] = useState<'reports' | 'experiments' | 'stages'>('reports')
+  const [tab, setTab] = useState<'reports' | 'experiments' | 'stages' | 'shadow'>('reports')
   const owner = me?.role === 'owner'
   return (
     <div className="space-y-4">
@@ -344,6 +345,7 @@ export default function Research() {
             { value: 'reports', label: 'Reports' },
             { value: 'experiments', label: 'Experiment log' },
             { value: 'stages', label: 'Strategy stages' },
+            { value: 'shadow', label: 'Shadow runs' },
           ]}
         />
       </div>
@@ -355,6 +357,13 @@ export default function Research() {
       )}
       {tab === 'experiments' && <Experiments owner={owner} />}
       {tab === 'stages' && <Lifecycle owner={owner} />}
+      {tab === 'shadow' && (
+        <Panel title="Shadow run and recommendation history from before the app" flush>
+          <div className="p-4">
+            <ShadowHistory showLabel />
+          </div>
+        </Panel>
+      )}
     </div>
   )
 }

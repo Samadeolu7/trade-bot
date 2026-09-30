@@ -544,6 +544,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/recommendations/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Events */
+        get: operations["recommendations_api_list_events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/recommendations/feeds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Feeds */
+        get: operations["recommendations_api_list_feeds"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/recommendations/feeds/{feed_id}/enabled": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Enabled */
+        post: operations["recommendations_api_set_enabled"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/research/experiments": {
         parameters: {
             query?: never;
@@ -994,6 +1045,11 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** EnabledIn */
+        EnabledIn: {
+            /** Enabled */
+            enabled: boolean;
+        };
         /** EquityPoint */
         EquityPoint: {
             /** Equity */
@@ -1065,6 +1121,47 @@ export interface components {
             items: components["schemas"]["ExperimentOut"][];
             /** Total */
             total: number;
+        };
+        /** FeedOut */
+        FeedOut: {
+            /** Direction */
+            direction: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Entry Price */
+            entry_price: number | null;
+            /** Entry Time */
+            entry_time: string | null;
+            /** Equity */
+            equity: number;
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Last Bar At */
+            last_bar_at: string | null;
+            /** Last Run At */
+            last_run_at: string | null;
+            /** Name */
+            name: string;
+            /** Near Miss */
+            near_miss: string | null;
+            /** Open Pnl Pct */
+            open_pnl_pct: number | null;
+            /** Status Reason */
+            status_reason: string;
+            /** Stop */
+            stop: number | null;
+            /** Strategy */
+            strategy: string;
+            /** Symbol */
+            symbol: string;
+            /** Take Profit */
+            take_profit: number | null;
+            /** Timeframe */
+            timeframe: string;
+            /** Weight */
+            weight: number;
         };
         /** FillOut */
         FillOut: {
@@ -1388,6 +1485,46 @@ export interface components {
             time: string;
             /** Venue */
             venue: string;
+        };
+        /** RecommendationOut */
+        RecommendationOut: {
+            /**
+             * Bar Time
+             * Format: date-time
+             */
+            bar_time: string;
+            /** Context */
+            context: {
+                [key: string]: unknown;
+            };
+            /** Direction */
+            direction: string;
+            /** Fear Greed */
+            fear_greed: string;
+            /** Feed */
+            feed: string;
+            /** From Weight */
+            from_weight: number | null;
+            /** Id */
+            id: number;
+            /** Imported */
+            imported: boolean;
+            /** Kind */
+            kind: string;
+            /** Pnl Pct */
+            pnl_pct: number | null;
+            /** Price */
+            price: number | null;
+            /** Reason */
+            reason: string;
+            /** Stop */
+            stop: number | null;
+            /** Take Profit */
+            take_profit: number | null;
+            /** Timeframe */
+            timeframe: string;
+            /** To Weight */
+            to_weight: number | null;
         };
         /** RuleIn */
         RuleIn: {
@@ -2515,6 +2652,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuoteOut"];
+                };
+            };
+        };
+    };
+    recommendations_api_list_events: {
+        parameters: {
+            query?: {
+                feed?: string | null;
+                kind?: string | null;
+                include_near_misses?: boolean;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecommendationOut"][];
+                };
+            };
+        };
+    };
+    recommendations_api_list_feeds: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedOut"][];
+                };
+            };
+        };
+    };
+    recommendations_api_set_enabled: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feed_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnabledIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedOut"];
                 };
             };
         };

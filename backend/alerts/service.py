@@ -155,7 +155,35 @@ def evaluate_prices(mids: dict[tuple[str, str], Decimal], history: PriceHistory,
     return fired
 
 
+def _bot_state(bot) -> str:
+    from trading.models import Position
+
+    position = Position.objects.filter(book=bot.book, symbol=bot.symbol).first()
+    if position is None or position.quantity == 0:
+        state = "flat"
+    else:
+        state = f"{position.direction} {position.quantity.normalize()} since {position.opened_at:%Y-%m-%d}"
+        if position.stop_price:
+            state += f", stop {_fmt(position.stop_price)}"
+    if bot.status != bot.Status.RUNNING:
+        state += f" ({bot.status})"
+    decision = bot.decisions.order_by("-bar_time").first()
+    if decision and decision.diagnosis.get("near_miss"):
+        state += f"; near miss: {decision.diagnosis.get('near_miss_reason') or decision.diagnosis.get('near_miss_key')}"
+    return state
+
+
+def _feed_state(feed) -> str:
+    if feed.strategy == "donchian_ensemble":
+        return f"hold {feed.weight:.0%} of capital"
+    if feed.direction:
+        return f"{feed.direction} since {feed.entry_time:%Y-%m-%d} at {_fmt(feed.entry_price)}, stop {_fmt(feed.stop)}"
+    miss = feed.last_diagnosis.get("near_miss_reason") if feed.last_diagnosis.get("near_miss") else None
+    return f"flat; near miss: {miss}" if miss else "flat"
+
+
 def daily_summaries(now: datetime | None = None) -> int:
+    from recommendations.models import Feed
     from trading.models import Bot, Position
     from trading.services import books
 
@@ -180,12 +208,20 @@ def daily_summaries(now: datetime | None = None) -> int:
             if troubled:
                 line += f", {troubled} bots stopped by errors"
             lines.append(line)
+            for bot in Bot.objects.filter(account=account).exclude(status=Bot.Status.STOPPED).order_by("name"):
+                lines.append(f"  {bot.name}: {_bot_state(bot)}")
+        feeds = Feed.objects.filter(enabled=True).order_by("name")
+        if feeds:
+            lines.append("MT5 recommendations:")
+            lines.extend(f"  {feed.name}: {_feed_state(feed)}" for feed in feeds)
         fire(rule, f"Daily summary {now:%Y-%m-%d}", "\n".join(lines) or "No accounts to report on.", now)
         fired += 1
     return fired
 
 
 DEFAULT_RULES = [
+    {"kind": AlertRule.Kind.RECOMMENDATION},
+    {"kind": AlertRule.Kind.NEAR_MISS},
     {"kind": AlertRule.Kind.BOT_TRADE},
     {"kind": AlertRule.Kind.STOP_HIT},
     {"kind": AlertRule.Kind.BOT_ERROR},

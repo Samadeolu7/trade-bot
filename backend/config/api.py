@@ -5,6 +5,7 @@ from ninja.security import django_auth
 from alerts.api import router as alerts_router
 from bot.broker.base import BrokerError
 from core.api import audit_router, router as auth_router, users_router
+from recommendations.api import router as recommendations_router
 from research.api import router as research_router
 from trading.api import router as trading_router
 from trading.services.orders import OrderError
@@ -18,6 +19,7 @@ api.add_router("/users", users_router)
 api.add_router("/audit", audit_router)
 api.add_router("/research", research_router)
 api.add_router("/alerts", alerts_router)
+api.add_router("/recommendations", recommendations_router)
 api.add_router("/", trading_router)
 
 

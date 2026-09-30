@@ -12,6 +12,7 @@ import BotDetail from './pages/BotDetail'
 import Bots from './pages/Bots'
 import Login, { TwoFactorSetup } from './pages/Login'
 import Overview from './pages/Overview'
+import Recommendations from './pages/Recommendations'
 import Research from './pages/Research'
 import Settings from './pages/Settings'
 import Trade from './pages/Trade'
@@ -49,6 +50,7 @@ function App() {
           <Route path="bots" element={<Bots />} />
           <Route path="bots/:id" element={<BotDetail />} />
           <Route path="accounts" element={<Accounts />} />
+          <Route path="recommendations" element={<Recommendations />} />
           <Route path="alerts" element={<Alerts />} />
           <Route path="research" element={<Research />} />
           <Route path="activity" element={<Activity />} />

@@ -11,6 +11,7 @@ import {
   useTradingMutation,
 } from '../api/hooks'
 import { EquityChart, PriceChart, type ChartLine, type ChartMarker } from '../components/charts'
+import ShadowHistory from '../components/ShadowHistory'
 import { OrdersTable, PositionsTable } from '../components/trading'
 import { Button, Dialog, Empty, ErrorText, KeyValue, ModeBadge, Panel, Status, Tabs, inputClass } from '../components/ui'
 import { useSelectedAccount } from '../lib/account'
@@ -130,7 +131,7 @@ export default function BotDetail() {
   const id = Number(useParams().id)
   const { data: bot, isLoading, error } = useBot(id)
   const { accounts } = useSelectedAccount()
-  const [tab, setTab] = useState<'positions' | 'orders'>('positions')
+  const [tab, setTab] = useState<'positions' | 'orders' | 'before'>('positions')
   const { data: candles } = useCandles(bot?.symbol ?? 'BTC/USDT', bot?.timeframe ?? '4h')
   const { data: fills } = useFills({ bot_id: id, limit: 500 })
   const { data: positions } = usePositions({ bot_id: id })
@@ -233,14 +234,21 @@ export default function BotDetail() {
             options={[
               { value: 'positions', label: 'Position' },
               { value: 'orders', label: 'Orders' },
+              { value: 'before', label: 'Before the app' },
             ]}
           />
         }
       >
-        {tab === 'positions' ? (
-          <PositionsTable botId={bot.id} canTrade={canTrade && bot.status !== 'running'} />
-        ) : (
-          <OrdersTable botId={bot.id} canTrade={canTrade} />
+        {tab === 'positions' && <PositionsTable botId={bot.id} canTrade={canTrade && bot.status !== 'running'} />}
+        {tab === 'orders' && <OrdersTable botId={bot.id} canTrade={canTrade} />}
+        {tab === 'before' && (
+          <div className="p-4">
+            <p className="mb-3 text-[13px] text-ink-2">
+              The {bot.name} shadow run's trades before the app. It traded one unit with no capital, so compare the
+              percentages, not amounts.
+            </p>
+            <ShadowHistory label={bot.name} />
+          </div>
         )}
       </Panel>
     </div>

@@ -599,6 +599,19 @@
         "title": "DecisionOut",
         "type": "object"
       },
+      "EnabledIn": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "EnabledIn",
+        "type": "object"
+      },
       "EquityPoint": {
         "properties": {
           "equity": {
@@ -763,6 +776,168 @@
           "items"
         ],
         "title": "ExperimentPage",
+        "type": "object"
+      },
+      "FeedOut": {
+        "properties": {
+          "direction": {
+            "title": "Direction",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "entry_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Price"
+          },
+          "entry_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Time"
+          },
+          "equity": {
+            "title": "Equity",
+            "type": "number"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "last_bar_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Bar At"
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "near_miss": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Near Miss"
+          },
+          "open_pnl_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open Pnl Pct"
+          },
+          "status_reason": {
+            "title": "Status Reason",
+            "type": "string"
+          },
+          "stop": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop"
+          },
+          "strategy": {
+            "title": "Strategy",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          },
+          "take_profit": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Take Profit"
+          },
+          "timeframe": {
+            "title": "Timeframe",
+            "type": "string"
+          },
+          "weight": {
+            "title": "Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "strategy",
+          "timeframe",
+          "symbol",
+          "enabled",
+          "kind",
+          "direction",
+          "entry_price",
+          "entry_time",
+          "stop",
+          "take_profit",
+          "open_pnl_pct",
+          "weight",
+          "equity",
+          "near_miss",
+          "last_bar_at",
+          "last_run_at",
+          "status_reason"
+        ],
+        "title": "FeedOut",
         "type": "object"
       },
       "FillOut": {
@@ -1651,6 +1826,138 @@
           "time"
         ],
         "title": "QuoteOut",
+        "type": "object"
+      },
+      "RecommendationOut": {
+        "properties": {
+          "bar_time": {
+            "format": "date-time",
+            "title": "Bar Time",
+            "type": "string"
+          },
+          "context": {
+            "additionalProperties": true,
+            "title": "Context",
+            "type": "object"
+          },
+          "direction": {
+            "title": "Direction",
+            "type": "string"
+          },
+          "fear_greed": {
+            "title": "Fear Greed",
+            "type": "string"
+          },
+          "feed": {
+            "title": "Feed",
+            "type": "string"
+          },
+          "from_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Weight"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "imported": {
+            "title": "Imported",
+            "type": "boolean"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "pnl_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pnl Pct"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "stop": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop"
+          },
+          "take_profit": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Take Profit"
+          },
+          "timeframe": {
+            "title": "Timeframe",
+            "type": "string"
+          },
+          "to_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Weight"
+          }
+        },
+        "required": [
+          "id",
+          "feed",
+          "timeframe",
+          "kind",
+          "bar_time",
+          "direction",
+          "price",
+          "stop",
+          "take_profit",
+          "from_weight",
+          "to_weight",
+          "pnl_pct",
+          "reason",
+          "context",
+          "fear_greed",
+          "imported"
+        ],
+        "title": "RecommendationOut",
         "type": "object"
       },
       "RuleIn": {
@@ -3967,6 +4274,168 @@
         "summary": "Get Quote",
         "tags": [
           "trading"
+        ]
+      }
+    },
+    "/api/recommendations/events": {
+      "get": {
+        "operationId": "recommendations_api_list_events",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "feed",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Feed"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_near_misses",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Near Misses",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RecommendationOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "List Events",
+        "tags": [
+          "recommendations"
+        ]
+      }
+    },
+    "/api/recommendations/feeds": {
+      "get": {
+        "operationId": "recommendations_api_list_feeds",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FeedOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "List Feeds",
+        "tags": [
+          "recommendations"
+        ]
+      }
+    },
+    "/api/recommendations/feeds/{feed_id}/enabled": {
+      "post": {
+        "operationId": "recommendations_api_set_enabled",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feed_id",
+            "required": true,
+            "schema": {
+              "title": "Feed Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnabledIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "Set Enabled",
+        "tags": [
+          "recommendations"
         ]
       }
     },

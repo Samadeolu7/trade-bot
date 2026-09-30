@@ -123,6 +123,8 @@ class Bot(models.Model):
     last_bar_at = models.DateTimeField(null=True, blank=True)
     last_run_at = models.DateTimeField(null=True, blank=True)
     consecutive_errors = models.PositiveIntegerField(default=0)
+    # the near-miss currently being reported, so a lasting one alerts once
+    near_miss_key = models.CharField(max_length=80, blank=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+")
     created_at = models.DateTimeField(auto_now_add=True)
 

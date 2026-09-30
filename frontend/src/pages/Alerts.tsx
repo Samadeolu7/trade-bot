@@ -12,6 +12,8 @@ const KINDS: { value: string; label: string; help: string }[] = [
   { value: 'price_above', label: 'Price crosses above', help: 'Fires once when the price rises through the level.' },
   { value: 'price_below', label: 'Price crosses below', help: 'Fires once when the price falls through the level.' },
   { value: 'price_move', label: 'Sudden move', help: 'Fires when the price moves this much, either way, within the window.' },
+  { value: 'recommendation', label: 'MT5 recommendations', help: 'Entries, stop moves, exits and resizes from the recommendation feeds.' },
+  { value: 'near_miss', label: 'Near misses', help: 'A strategy says an entry looks close, once per setup.' },
   { value: 'bot_trade', label: 'Bot trades', help: 'Every order a bot places, with its reason.' },
   { value: 'stop_hit', label: 'Stop or take profit hit', help: 'Whenever the engine closes a position at its stop or target.' },
   { value: 'bot_error', label: 'Bot or engine problem', help: 'A bot stopped by errors, or the engine going down and coming back.' },
@@ -114,7 +116,7 @@ function NewRule() {
               <input className={inputClass} inputMode="numeric" value={hour} onChange={(e) => setHour(e.target.value)} />
             </Field>
           )}
-          {(kind === 'bot_trade' || kind === 'stop_hit' || kind === 'bot_error') && (
+          {(kind === 'bot_trade' || kind === 'stop_hit' || kind === 'bot_error' || kind === 'near_miss') && (
             <Field label="Bot">
               <select className={inputClass} value={botId} onChange={(e) => setBotId(e.target.value)}>
                 <option value="">Any bot</option>
@@ -178,8 +180,8 @@ function Rules() {
           </Button>
         }
       >
-        No alerts yet. The recommended set covers bot trades, stops, problems, finished reports, a daily summary and
-        3% moves within an hour. You can switch any of them off afterwards.
+        No alerts yet. The recommended set covers MT5 recommendations, near misses, bot trades, stops, problems,
+        finished reports, a daily summary and 3% moves within an hour. You can switch any of them off afterwards.
       </Empty>
     )
   return (

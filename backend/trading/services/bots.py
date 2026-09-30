@@ -33,12 +33,17 @@ def strategy_defaults(name: str) -> dict[str, dict]:
     return {s: copy.deepcopy(strategy_config.get(s, {})) for s in STRATEGY_CATALOG[name].config_sections}
 
 
-def strategy_config_for(bot: Bot) -> dict:
+def strategy_config_with(params: dict | None) -> dict:
+    """config.yaml's strategy settings with "section.key" overrides applied."""
     config = copy.deepcopy(trade_bot_config().get("strategy", {}))
-    for path, value in (bot.params or {}).items():
+    for path, value in (params or {}).items():
         section, key = path.split(".", 1)
         config.setdefault(section, {})[key] = value
     return config
+
+
+def strategy_config_for(bot: Bot) -> dict:
+    return strategy_config_with(bot.params)
 
 
 def build_bot_strategy(bot: Bot, funding_df=None, funding_refresh_fn=None):

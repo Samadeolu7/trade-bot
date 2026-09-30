@@ -29,8 +29,14 @@ seconds. If it stops, the worker sends an "Engine is down" alert and the app sho
 only spends its own allocation and only sells what it bought. The books always add up to the venue's
 balances (tested in `backend/tests/test_orders.py`).
 
+**Recommendations** replace `python main.py recommend`: the strategies in `config.yaml`'s `recommend`
+section run as advisory feeds (`backend/recommendations/`) and never place orders. They make the same
+calls as before (same code, Exness cost placeholders, exits judged at bar close), with the reason and a Fear
+& Greed reading on each entry, and appear on the Recommendations page and as "MT5 recommendations" alerts.
+
 **Alerts** are rules each person chooses on the Alerts page, TradingView-style: price crosses, sudden
-moves, bot trades, stops hit, bot or engine problems, finished research reports and a daily summary. They
+moves, MT5 recommendations, near misses, bot trades, stops hit, bot or engine problems, finished research
+reports and a daily summary. They
 go to that person's Telegram chat and the in-app alert log.
 
 ### Adding a strategy

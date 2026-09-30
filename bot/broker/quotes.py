@@ -112,18 +112,27 @@ class FallbackQuoteSource:
     network (it times out from the development machine), so the CFD
     profile falls back to Quidax's mid price with its own spread applied."""
 
-    def __init__(self, sources: list, spread: Decimal = Decimal(0)):
+    def __init__(self, sources: list, spread: Decimal = Decimal(0), retry_after_seconds: float = 60.0):
         self.sources = sources
         self.spread = spread
+        self.retry_after_seconds = retry_after_seconds
+        # a source that just failed is skipped for a while rather than
+        # costing a full timeout on every quote
+        self._failed_at: dict[int, float] = {}
 
     def quote(self, symbol: str) -> Quote:
         errors = []
         for i, source in enumerate(self.sources):
+            failed = self._failed_at.get(i)
+            if failed is not None and time.monotonic() - failed < self.retry_after_seconds and i < len(self.sources) - 1:
+                continue
             try:
                 quote = source.quote(symbol)
             except BrokerError as exc:
+                self._failed_at[i] = time.monotonic()
                 errors.append(str(exc))
                 continue
+            self._failed_at.pop(i, None)
             if i == 0 or self.spread == 0:
                 return quote
             half = quote.mid * self.spread / 2

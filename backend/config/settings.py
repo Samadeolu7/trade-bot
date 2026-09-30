@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     "trading",
     "research",
     "alerts",
+    "recommendations",
 ]
 
 MIDDLEWARE = [

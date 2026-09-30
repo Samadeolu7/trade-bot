@@ -33,6 +33,8 @@ from market.candles import backfill_candles, backfill_funding, candles_df, fundi
 from alerts.models import AlertRule
 from alerts.service import PriceHistory, daily_summaries, evaluate_prices, notify
 from trading.engine.adapters import Outcome, evaluate_exposure_bot, evaluate_signal_bot, jsonable
+from recommendations.models import Feed
+from recommendations.runner import run_feed
 from trading.events import SYSTEM_GROUP, market_group, publish
 from trading.models import Bot, BotDecision, EquitySnapshot, LedgerEntry, Order, Position, TradingAccount
 from trading.services import books
@@ -200,14 +202,19 @@ class Engine:
 
     def poll_bars(self) -> None:
         bots = list(Bot.objects.filter(status=Bot.Status.RUNNING).select_related("account"))
+        feeds = list(Feed.objects.filter(enabled=True))
         # the trade page's chart needs every timeframe, whether or not a bot uses it
-        series = {(b.symbol, b.timeframe) for b in bots} | {(CHART_SYMBOL, tf) for tf in TIMEFRAMES}
+        series = (
+            {(b.symbol, b.timeframe) for b in bots}
+            | {(f.symbol, f.timeframe) for f in feeds}
+            | {(CHART_SYMBOL, tf) for tf in TIMEFRAMES}
+        )
         for symbol, timeframe in sorted(series):
             try:
                 backfill_candles(self.exchange, self.exchange_id, symbol, timeframe, self.backfill_start)
             except Exception:
                 logger.exception("candle backfill %s %s failed", symbol, timeframe)
-        if any(b.strategy == "funding_filtered" for b in bots):
+        if any(x.strategy == "funding_filtered" for x in [*bots, *feeds]):
             try:
                 backfill_funding(self.funding_config.get("exchange_id", "binanceusdm"),
                                  self.funding_config.get("symbol", "BTC/USDT:USDT"),
@@ -216,6 +223,13 @@ class Engine:
                 logger.exception("funding backfill failed")
         for bot in bots:
             self.run_bot(bot)
+        for feed in feeds:
+            try:
+                run_feed(feed, self.exchange_id, self.funding_config)
+            except Exception as exc:
+                logger.exception("recommendation feed %s failed", feed.name)
+                feed.status_reason = f"error: {exc}"[:300]
+                feed.save(update_fields=["status_reason"])
 
     def run_bot(self, bot: Bot) -> BotDecision | None:
         try:
@@ -270,6 +284,7 @@ class Engine:
             bot.status_reason = ""
             bot.save(update_fields=["last_bar_at", "last_run_at", "consecutive_errors", "status_reason"])
         publish(f"account.{bot.account_id}", "decision", {"bot": bot.pk, "action": outcome.action})
+        self._near_miss(bot, outcome)
 
         if outcome.order is not None:
             order = outcome.order
@@ -283,6 +298,20 @@ class Engine:
             notify(AlertRule.Kind.BOT_TRADE, title, f"{outcome.reason} ({bot.account.name})",
                    account=bot.account, bot=bot)
         return decision
+
+    def _near_miss(self, bot: Bot, outcome: Outcome) -> None:
+        """A flat bot whose strategy says an entry looks close: alert once per
+        condition, as the CLI's shadow runs did."""
+        diagnosis = outcome.diagnosis
+        near = outcome.action == BotDecision.Action.NONE and diagnosis.get("near_miss")
+        key = diagnosis.get("near_miss_key") if near else None
+        if (key or "") == bot.near_miss_key:
+            return
+        bot.near_miss_key = key or ""
+        bot.save(update_fields=["near_miss_key"])
+        if key:
+            notify(AlertRule.Kind.NEAR_MISS, f"Near miss: {bot.name} ({bot.timeframe})",
+                   diagnosis.get("near_miss_reason") or key, account=bot.account, bot=bot)
 
     # --- periodic -----------------------------------------------------------------
 

@@ -13,6 +13,7 @@ const NAV = [
   { to: '/trade', label: 'Trade', icon: 'M4 18l5-6 4 3 7-9' },
   { to: '/bots', label: 'Bots', icon: 'M7 8h10v9H7zM12 4v4M9 12h.01M15 12h.01' },
   { to: '/accounts', label: 'Accounts', icon: 'M4 7h16v11H4zM4 11h16' },
+  { to: '/recommendations', label: 'Recommendations', icon: 'M4 17l5-5 3 3 8-8M15 7h5v5' },
   { to: '/alerts', label: 'Alerts', icon: 'M6 16V11a6 6 0 1112 0v5l2 2H4zM10 20a2 2 0 004 0' },
   { to: '/research', label: 'Research', icon: 'M5 19V9M10 19V5M15 19v-7M20 19v-4' },
   { to: '/activity', label: 'Activity', icon: 'M4 6h16M4 12h10M4 18h13' },
@@ -93,9 +94,9 @@ export default function Shell() {
             to={item.to}
             end={item.to === '/'}
             className={({ isActive }) =>
-              `flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] md:flex-none md:flex-row md:gap-3 md:px-5 md:py-2 md:text-[14px] ${
+              `flex min-w-0 flex-1 flex-col items-center gap-0.5 py-2 text-[10px] md:flex-none md:flex-row md:gap-3 md:px-5 md:py-2 md:text-[14px] ${
                 isActive ? 'text-ink md:bg-sunken' : 'text-muted hover:text-ink'
-              } ${['/accounts', '/activity', '/settings'].includes(item.to) ? 'max-md:hidden' : ''}`
+              } ${['/accounts', '/research', '/activity', '/settings'].includes(item.to) ? 'max-md:hidden' : ''}`
             }
           >
             <Icon d={item.icon} />
@@ -118,6 +119,9 @@ export default function Shell() {
                 </NavLink>
                 <NavLink to="/accounts" className="block rounded px-3 py-2 text-[13px] hover:bg-sunken md:hidden">
                   Accounts
+                </NavLink>
+                <NavLink to="/research" className="block rounded px-3 py-2 text-[13px] hover:bg-sunken md:hidden">
+                  Research
                 </NavLink>
                 <NavLink to="/activity" className="block rounded px-3 py-2 text-[13px] hover:bg-sunken md:hidden">
                   Activity
