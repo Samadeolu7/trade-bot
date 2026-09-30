@@ -6,7 +6,8 @@ from django.utils import timezone
 from ninja import Router, Schema
 from ninja.errors import HttpError
 
-from alerts.models import AlertEvent, AlertRule
+from alerts import push
+from alerts.models import AlertEvent, AlertRule, PushSubscription
 from alerts.service import add_default_rules, chat_for, deliver
 from bot.broker.venues import VENUES
 from core.audit import audit
@@ -206,3 +207,55 @@ def test_telegram(request):
     if not deliver(request.user, "Test alert from the trade desk", "If you can read this, alerts will reach you here."):
         raise HttpError(502, "Telegram didn't accept the message; check the chat ID and that you've messaged the bot")
     return {"ok": True}
+
+
+# --- browser notifications (Web Push) ------------------------------------------------
+
+
+class PushKeyOut(Schema):
+    public_key: str
+    devices: int
+
+
+@router.get("/push", response=PushKeyOut)
+def push_status(request):
+    return {"public_key": push.public_key(),
+            "devices": PushSubscription.objects.filter(user=request.user).count()}
+
+
+class PushSubscriptionIn(Schema):
+    endpoint: str
+    p256dh: str
+    auth: str
+
+
+@router.post("/push/subscribe", response=PushKeyOut)
+def push_subscribe(request, payload: PushSubscriptionIn):
+    if not payload.endpoint.startswith("https://"):
+        raise HttpError(400, "not a push endpoint")
+    PushSubscription.objects.update_or_create(
+        endpoint=payload.endpoint,
+        defaults={"user": request.user, "p256dh": payload.p256dh, "auth": payload.auth,
+                  "user_agent": request.META.get("HTTP_USER_AGENT", "")[:300]},
+    )
+    audit("alert.push_on", request=request, target=f"user:{request.user.pk}")
+    return push_status(request)
+
+
+class EndpointIn(Schema):
+    endpoint: str
+
+
+@router.post("/push/unsubscribe", response=PushKeyOut)
+def push_unsubscribe(request, payload: EndpointIn):
+    PushSubscription.objects.filter(user=request.user, endpoint=payload.endpoint).delete()
+    return push_status(request)
+
+
+@router.post("/push/test")
+def push_test(request):
+    if not push.send(request.user, "Test notification from the trade desk",
+                     "If you can see this, alerts will reach this device even when the app isn't open."):
+        raise HttpError(400, "no browser accepted it; turn notifications on for this browser first")
+    return {"ok": True}
+

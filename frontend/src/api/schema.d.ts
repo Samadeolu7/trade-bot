@@ -161,6 +161,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/alerts/push": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Push Status */
+        get: operations["alerts_api_push_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/alerts/push/subscribe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Push Subscribe */
+        post: operations["alerts_api_push_subscribe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/alerts/push/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Push Test */
+        post: operations["alerts_api_push_test"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/alerts/push/unsubscribe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Push Unsubscribe */
+        post: operations["alerts_api_push_unsubscribe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/alerts/rules": {
         parameters: {
             query?: never;
@@ -1110,6 +1178,11 @@ export interface components {
             /** Enabled */
             enabled: boolean;
         };
+        /** EndpointIn */
+        EndpointIn: {
+            /** Endpoint */
+            endpoint: string;
+        };
         /** EquityPoint */
         EquityPoint: {
             /** Equity */
@@ -1549,6 +1622,22 @@ export interface components {
             stop_price?: number | string | null;
             /** Take Profit */
             take_profit?: number | string | null;
+        };
+        /** PushKeyOut */
+        PushKeyOut: {
+            /** Devices */
+            devices: number;
+            /** Public Key */
+            public_key: string;
+        };
+        /** PushSubscriptionIn */
+        PushSubscriptionIn: {
+            /** Auth */
+            auth: string;
+            /** Endpoint */
+            endpoint: string;
+            /** P256Dh */
+            p256dh: string;
         };
         /** QuoteOut */
         QuoteOut: {
@@ -2117,6 +2206,92 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EventOut"];
+                };
+            };
+        };
+    };
+    alerts_api_push_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PushKeyOut"];
+                };
+            };
+        };
+    };
+    alerts_api_push_subscribe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PushSubscriptionIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PushKeyOut"];
+                };
+            };
+        };
+    };
+    alerts_api_push_test: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    alerts_api_push_unsubscribe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EndpointIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PushKeyOut"];
                 };
             };
         };

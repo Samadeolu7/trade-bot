@@ -146,6 +146,9 @@ ENGINE = {
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
+# who push services contact about this sender (Web Push requires one)
+PUSH_CONTACT_EMAIL = os.environ.get("PUSH_CONTACT_EMAIL", "alerts@yincools.com.ng")
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

@@ -59,3 +59,25 @@ class AlertEvent(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class PushSubscription(models.Model):
+    """A browser that has agreed to show this person's alerts as system
+    notifications (Web Push). One per browser/device."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="push_subscriptions")
+    endpoint = models.URLField(max_length=1000, unique=True)
+    p256dh = models.CharField(max_length=200)
+    auth = models.CharField(max_length=100)
+    user_agent = models.CharField(max_length=300, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_success_at = models.DateTimeField(null=True, blank=True)
+
+
+class PushKeys(models.Model):
+    """The server's Web Push (VAPID) key pair, generated on first use. A
+    single row; the browser needs the public half to subscribe."""
+
+    private_pem = models.TextField()
+    public_key = models.CharField(max_length=200)
+    created_at = models.DateTimeField(auto_now_add=True)

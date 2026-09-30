@@ -152,3 +152,49 @@ def test_repeating_price_alert_fires_again_after_cooldown(owner):
     assert evaluate_prices({KEY: D(101)}, history, T0 + timedelta(minutes=21)) == 1
     rule.refresh_from_db()
     assert rule.enabled is True
+
+
+def test_alerts_are_pushed_to_subscribed_browsers(owner, monkeypatch):
+    from types import SimpleNamespace
+
+    from pywebpush import WebPushException
+
+    from alerts.models import PushSubscription
+
+    sent = []
+
+    def fake_webpush(subscription_info, data, **kwargs):
+        if "gone" in subscription_info["endpoint"]:
+            raise WebPushException("gone", response=SimpleNamespace(status_code=410))
+        sent.append((subscription_info["endpoint"], json.loads(data)))
+
+    import json
+
+    monkeypatch.setattr("alerts.push.webpush", fake_webpush)
+    PushSubscription.objects.create(user=owner, endpoint="https://push.example/live", p256dh="k", auth="a")
+    PushSubscription.objects.create(user=owner, endpoint="https://push.example/gone", p256dh="k", auth="a")
+    AlertRule.objects.create(user=owner, kind="research_done")
+
+    notify("research_done", "Report ready", "donchian: +3%")
+
+    assert sent == [("https://push.example/live",
+                     {"title": "Report ready", "body": "donchian: +3%", "url": "/alerts?tab=log",
+                      "tag": f"alert-{AlertEvent.objects.get().pk}"})]
+    # the push service said the second browser is gone, so it's forgotten
+    assert list(PushSubscription.objects.values_list("endpoint", flat=True)) == ["https://push.example/live"]
+
+
+def test_push_subscription_api(owner):
+    import json
+
+    from django.test import Client
+
+    client = Client()
+    client.post("/api/auth/login", json.dumps({"username": "owner", "password": "correct-horse-battery"}),
+                content_type="application/json")
+    status = client.get("/api/alerts/push").json()
+    assert status["devices"] == 0 and len(status["public_key"]) > 80
+    body = {"endpoint": "https://fcm.googleapis.com/fcm/send/abc", "p256dh": "k", "auth": "a"}
+    assert client.post("/api/alerts/push/subscribe", json.dumps(body), content_type="application/json").json()["devices"] == 1
+    assert client.post("/api/alerts/push/unsubscribe", json.dumps({"endpoint": body["endpoint"]}),
+                       content_type="application/json").json()["devices"] == 0

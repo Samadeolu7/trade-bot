@@ -17,6 +17,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.utils import timezone
 
+from alerts import push
 from alerts.models import AlertEvent, AlertRule
 from bot.alerting.telegram import TelegramAlerter
 from trading.events import _send
@@ -54,6 +55,10 @@ def fire(rule: AlertRule, title: str, body: str = "", at: datetime | None = None
     delivered = deliver(rule.user, title, body)
     event = AlertEvent.objects.create(rule=rule, user=rule.user, kind=rule.kind, title=title[:200],
                                       body=body, delivered=delivered)
+    try:
+        push.send(rule.user, title, body, tag=f"alert-{event.pk}")
+    except Exception:
+        logger.exception("browser push for rule %s failed", rule.pk)
     rule.last_fired_at = at or event.created_at
     fields = ["last_fired_at", "state"]
     if rule.once:

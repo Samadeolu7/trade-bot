@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { client, unwrap, type Schemas } from '../api/client'
 import { useBots } from '../api/hooks'
+import { currentSubscription, disablePush, enablePush, pushSupport } from '../lib/push'
 import { Button, Empty, ErrorText, Field, Panel, Tabs, inputClass } from '../components/ui'
 import { useSelectedAccount } from '../lib/account'
 import { ago, dateTime, money } from '../lib/format'
@@ -275,6 +276,67 @@ function Log() {
   )
 }
 
+function BrowserNotifications() {
+  const qc = useQueryClient()
+  const support = pushSupport()
+  const { data: status } = useQuery({
+    queryKey: ['alerts', 'push'],
+    queryFn: () => unwrap(client.GET('/api/alerts/push')),
+    enabled: support === 'ok',
+  })
+  const { data: here, refetch } = useQuery({
+    queryKey: ['alerts', 'push', 'this-browser'],
+    queryFn: async () => !!(await currentSubscription()),
+    enabled: support === 'ok',
+  })
+  const done = () => {
+    refetch()
+    qc.invalidateQueries({ queryKey: ['alerts', 'push'] })
+  }
+  const on = useMutation({ mutationFn: () => enablePush(status!.public_key), onSuccess: done })
+  const off = useMutation({ mutationFn: disablePush, onSuccess: done })
+  const test = useMutation({ mutationFn: () => unwrap(client.POST('/api/alerts/push/test')) })
+
+  if (support === 'install-first') {
+    return (
+      <p className="max-w-prose text-[13px] text-ink-2">
+        On iPhone and iPad, Apple only allows notifications from apps on the Home Screen. Tap Share, then “Add to Home
+        Screen”, open Trade desk from there, and turn notifications on here.
+      </p>
+    )
+  }
+  if (support === 'unsupported') {
+    return <p className="text-[13px] text-ink-2">This browser can’t show notifications from websites.</p>
+  }
+  return (
+    <div className="max-w-prose space-y-3">
+      <p className="text-[13px] text-ink-2">
+        Alerts appear as system notifications on this device even when the app isn’t open, as long as the browser is
+        running. Turn it on in each browser or phone you want them on.
+        {status && status.devices > 0 && ` On for ${status.devices} ${status.devices === 1 ? 'device' : 'devices'}.`}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {here ? (
+          <>
+            <Button onClick={() => test.mutate()} disabled={test.isPending}>
+              Send a test notification
+            </Button>
+            <Button onClick={() => off.mutate()} disabled={off.isPending}>
+              Turn off for this browser
+            </Button>
+          </>
+        ) : (
+          <Button variant="primary" onClick={() => on.mutate()} disabled={!status || on.isPending}>
+            Turn on for this browser
+          </Button>
+        )}
+      </div>
+      {test.isSuccess && <p className="text-[13px] text-ink-2">Sent. It should appear in a few seconds.</p>}
+      <ErrorText error={on.error ?? off.error ?? test.error} />
+    </div>
+  )
+}
+
 export function TelegramSettings() {
   const qc = useQueryClient()
   const { data } = useQuery({ queryKey: keys.telegram, queryFn: () => unwrap(client.GET('/api/alerts/telegram')) })
@@ -339,6 +401,9 @@ export default function Alerts() {
             <Rules />
           </Panel>
           <NewRule />
+          <Panel title="Browser notifications">
+            <BrowserNotifications />
+          </Panel>
           <Panel title="Telegram">
             <TelegramSettings />
           </Panel>

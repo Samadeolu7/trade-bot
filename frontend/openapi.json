@@ -624,6 +624,19 @@
         "title": "EnabledIn",
         "type": "object"
       },
+      "EndpointIn": {
+        "properties": {
+          "endpoint": {
+            "title": "Endpoint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint"
+        ],
+        "title": "EndpointIn",
+        "type": "object"
+      },
       "EquityPoint": {
         "properties": {
           "equity": {
@@ -1851,6 +1864,47 @@
           }
         },
         "title": "ProtectionIn",
+        "type": "object"
+      },
+      "PushKeyOut": {
+        "properties": {
+          "devices": {
+            "title": "Devices",
+            "type": "integer"
+          },
+          "public_key": {
+            "title": "Public Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "public_key",
+          "devices"
+        ],
+        "title": "PushKeyOut",
+        "type": "object"
+      },
+      "PushSubscriptionIn": {
+        "properties": {
+          "auth": {
+            "title": "Auth",
+            "type": "string"
+          },
+          "endpoint": {
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "p256dh": {
+            "title": "P256Dh",
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint",
+          "p256dh",
+          "auth"
+        ],
+        "title": "PushSubscriptionIn",
         "type": "object"
       },
       "QuoteOut": {
@@ -3131,6 +3185,127 @@
           }
         ],
         "summary": "Dismiss",
+        "tags": [
+          "alerts"
+        ]
+      }
+    },
+    "/api/alerts/push": {
+      "get": {
+        "operationId": "alerts_api_push_status",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushKeyOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "Push Status",
+        "tags": [
+          "alerts"
+        ]
+      }
+    },
+    "/api/alerts/push/subscribe": {
+      "post": {
+        "operationId": "alerts_api_push_subscribe",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PushSubscriptionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushKeyOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "Push Subscribe",
+        "tags": [
+          "alerts"
+        ]
+      }
+    },
+    "/api/alerts/push/test": {
+      "post": {
+        "operationId": "alerts_api_push_test",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "Push Test",
+        "tags": [
+          "alerts"
+        ]
+      }
+    },
+    "/api/alerts/push/unsubscribe": {
+      "post": {
+        "operationId": "alerts_api_push_unsubscribe",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndpointIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushKeyOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "Push Unsubscribe",
         "tags": [
           "alerts"
         ]

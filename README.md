@@ -37,7 +37,10 @@ calls as before (same code, Exness cost placeholders, exits judged at bar close)
 **Alerts** are rules each person chooses on the Alerts page, TradingView-style: price crosses, sudden
 moves, MT5 recommendations, near misses, bot trades, stops hit, bot or engine problems, finished research
 reports and a daily summary. They
-go to that person's Telegram chat and the in-app alert log.
+go to that person's Telegram chat, the in-app alert log (they stay on screen until dismissed) and, once turned
+on per browser on the Alerts page, system notifications via Web Push (`backend/alerts/push.py`,
+`frontend/public/sw.js`), which arrive with the app closed. The server's push keys are generated on first use.
+iPhones need the app added to the Home Screen first.
 
 ### Adding a strategy
 

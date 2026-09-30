@@ -10,3 +10,4 @@ dj-database-url>=3.1,<4
 qrcode>=8.2,<9
 redis>=5
 pytest-django>=4.14
+pywebpush>=2.5,<3

@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { useMe } from './api/hooks'
 import { AccountProvider } from './lib/account'
+import { registerServiceWorker } from './lib/push'
 import Shell from './layout/Shell'
 import Accounts from './pages/Accounts'
 import Activity from './pages/Activity'
@@ -24,6 +25,8 @@ try {
 } catch {
   /* default to the device's scheme */
 }
+
+registerServiceWorker()
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 2_000, refetchOnWindowFocus: true } },
