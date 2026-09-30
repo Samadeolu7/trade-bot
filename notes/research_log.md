@@ -53,3 +53,40 @@ donchian_ensemble 4h with rebalance_threshold 0.1: test Sharpe 0.90, return
 ADA, DOGE. This is the paper's own route to Sharpe >1.5: breadth, not
 tuning. Success means positive test Sharpe on most coins. Then a
 multi-coin portfolio is the candidate.
+
+**Batch 2 results (jobs 10–15), untuned ensemble per coin, train → test Sharpe:**
+BTC 1.45→0.90, ETH 1.38→0.75, SOL 1.83→0.39, BNB 1.20→0.88, XRP 0.50→1.36,
+ADA 1.45→0.68, DOGE 0.85→0.96. **Positive in all 14 coin-windows**, including
+ADA (+17.8% while buy & hold was -52.8%) and SOL/ETH (buy & hold negative).
+It beats plain donchian's test Sharpe on 5 of 7 coins (not ETH, DOGE).
+
+**Equal-weight 7-coin portfolio** (approximation: mean of each coin's
+normalized equity curve from the job results, ~300 points per window, no
+cross-coin rebalancing, fees included per coin; the method reproduces BTC's
+own Sharpe, 0.92 vs 0.90 reported):
+
+| | Train Sharpe / DD | Test return / DD / Sharpe |
+|---|---|---|
+| BTC alone, vol_target 0.25 | ~1.29 / -16.9% | +30.8% / -11.1% / ~0.92 |
+| 7 coins, vol_target 0.25 | ~1.51 / -8.5% | +28.8% / -6.8% / ~1.14 |
+| 7 coins, vol_target 0.40 (jobs 16–21) | ~1.58 / -14.3% | +42.0% / -11.5% / ~1.04 |
+
+Average pairwise correlation of the coins' strategy returns: 0.25 train,
+0.41 test. That's where the improvement comes from. The portfolio beats BTC
+alone in both windows without anything being picked on test. It follows the
+paper's own design, and it's the best candidate found. At vol_target 0.4 it
+matches BTC-alone's drawdown with more return. The vol target is a risk
+choice, not a finding.
+
+**Caveats:**
+- **Survivorship bias.** The seven coins were chosen today as large,
+  surviving coins. Coins that collapsed in the window (LUNA, FTT, ...) aren't
+  in the test, which flatters it. The paper uses a point-in-time top-20.
+- The portfolio numbers are an approximation from downsampled curves, not a
+  full multi-asset backtest.
+- The holdout is already spent for the ensemble on BTC/ETH. The other five
+  coins' holdout windows are untouched, so they could serve as a clean check.
+- Whether all seven are tradable on the user's venue (MT5/Exness CFDs,
+  Quidax spot) isn't checked.
+
+Jobs used on this key: 21 of 30.
