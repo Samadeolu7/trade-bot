@@ -6,9 +6,20 @@ from ninja.errors import HttpError
 
 from bot.research.lifecycle import STAGES
 from core.audit import audit
+from django.db.models import F
+from django.utils import timezone
+
 from research.jobs import JobError, RepeatJobError, check_not_repeat, validate_params
+from research.keys import create_key, research_auth
 from research.legacy_reports import legacy_reports
-from research.models import Experiment, ResearchJob, ShadowRebalance, ShadowTrade, StrategyLifecycle
+from research.models import (
+    Experiment,
+    ResearchApiKey,
+    ResearchJob,
+    ShadowRebalance,
+    ShadowTrade,
+    StrategyLifecycle,
+)
 from trading.permissions import require_owner, require_verified
 
 router = Router(tags=["research"])
@@ -37,7 +48,7 @@ class ExperimentPage(Schema):
     items: list[ExperimentOut]
 
 
-@router.get("/experiments", response=ExperimentPage)
+@router.get("/experiments", response=ExperimentPage, auth=research_auth)
 def list_experiments(request, strategy: str | None = None, kind: str | None = None,
                      decision: str | None = None, limit: int = 100, offset: int = 0):
     rows = Experiment.objects.all()
@@ -135,12 +146,12 @@ class JobIn(Schema):
     params: dict[str, list] = {}
 
 
-@router.get("/jobs", response=list[JobOut])
+@router.get("/jobs", response=list[JobOut], auth=research_auth)
 def list_jobs(request, limit: int = 50):
     return list(ResearchJob.objects.order_by("-created_at")[: min(limit, 200)])
 
 
-@router.get("/jobs/{job_id}", response=JobOut)
+@router.get("/jobs/{job_id}", response=JobOut, auth=research_auth)
 def get_job(request, job_id: int):
     job = ResearchJob.objects.filter(pk=job_id).first()
     if job is None:
@@ -148,11 +159,15 @@ def get_job(request, job_id: int):
     return job
 
 
-@router.post("/jobs", response=JobOut)
+@router.post("/jobs", response=JobOut, auth=research_auth)
 def create_job(request, payload: JobIn):
-    if request.user.role == "viewer":
-        raise HttpError(403, "viewers can't start research jobs")
-    require_verified(request)
+    key = getattr(request, "research_key", None)
+    if key is None:
+        if request.user.role == "viewer":
+            raise HttpError(403, "viewers can't start research jobs")
+        require_verified(request)
+    elif key.jobs_started >= key.max_jobs:
+        raise HttpError(429, f"this key has started its limit of {key.max_jobs} jobs; create a new one")
     try:
         params = validate_params(ResearchJob.Kind.RESEARCH_REPORT, payload.dict())
         check_not_repeat(params)
@@ -161,8 +176,66 @@ def create_job(request, payload: JobIn):
     except JobError as exc:
         raise HttpError(400, str(exc)) from exc
     job = ResearchJob.objects.create(kind=ResearchJob.Kind.RESEARCH_REPORT, params=params, created_by=request.user)
-    audit("research.job", request=request, target=f"job:{job.pk}", params=params)
+    if key is not None:
+        ResearchApiKey.objects.filter(pk=key.pk).update(jobs_started=F("jobs_started") + 1)
+    audit("research.job", request=request, target=f"job:{job.pk}", params=params,
+          via_key=f"{key.name} ({key.prefix})" if key else "")
     return job
+
+
+class ApiKeyOut(Schema):
+    id: int
+    name: str
+    prefix: str
+    status: str
+    created_at: datetime
+    expires_at: datetime
+    last_used_at: datetime | None
+    max_jobs: int
+    jobs_started: int
+
+
+class ApiKeyIn(Schema):
+    name: str
+    hours: int = 24
+    max_jobs: int = 30
+
+
+class ApiKeyCreated(ApiKeyOut):
+    key: str
+
+
+@router.get("/keys", response=list[ApiKeyOut])
+def list_keys(request):
+    require_owner(request)
+    return list(ResearchApiKey.objects.all()[:100])
+
+
+@router.post("/keys", response=ApiKeyCreated)
+def new_key(request, payload: ApiKeyIn):
+    """Shows the key once; only its hash is kept."""
+    require_owner(request)
+    require_verified(request)
+    try:
+        row, key = create_key(request.user, payload.name, payload.hours, payload.max_jobs)
+    except ValueError as exc:
+        raise HttpError(400, str(exc)) from exc
+    audit("research.key_created", request=request, target=f"research_key:{row.prefix}",
+          name=row.name, expires_at=row.expires_at.isoformat(), max_jobs=row.max_jobs)
+    return {**ApiKeyOut.from_orm(row).dict(), "key": key}
+
+
+@router.post("/keys/{key_id}/revoke", response=ApiKeyOut)
+def revoke_key(request, key_id: int):
+    require_owner(request)
+    row = ResearchApiKey.objects.filter(pk=key_id).first()
+    if row is None:
+        raise HttpError(404, "no such key")
+    if row.revoked_at is None:
+        row.revoked_at = timezone.now()
+        row.save(update_fields=["revoked_at"])
+        audit("research.key_revoked", request=request, target=f"research_key:{row.prefix}", name=row.name)
+    return row
 
 
 class ShadowTradeOut(Schema):
@@ -211,7 +284,7 @@ class LegacyReportOut(Schema):
     runs: list[dict]
 
 
-@router.get("/legacy-reports", response=list[LegacyReportOut])
+@router.get("/legacy-reports", response=list[LegacyReportOut], auth=research_auth)
 def list_legacy_reports(request):
     """Reports run by the CLI (the Research Report workflow), rebuilt from
     their experiment rows."""

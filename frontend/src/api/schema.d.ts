@@ -772,6 +772,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/research/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Keys */
+        get: operations["research_api_list_keys"];
+        put?: never;
+        /**
+         * New Key
+         * @description Shows the key once; only its hash is kept.
+         */
+        post: operations["research_api_new_key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/research/keys/{key_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Key */
+        post: operations["research_api_revoke_key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/research/legacy-reports": {
         parameters: {
             query?: never;
@@ -992,6 +1030,77 @@ export interface components {
             /** Name */
             name: string;
             venue: components["schemas"]["VenueOut"];
+        };
+        /** ApiKeyCreated */
+        ApiKeyCreated: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Id */
+            id: number;
+            /** Jobs Started */
+            jobs_started: number;
+            /** Key */
+            key: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Max Jobs */
+            max_jobs: number;
+            /** Name */
+            name: string;
+            /** Prefix */
+            prefix: string;
+            /** Status */
+            status: string;
+        };
+        /** ApiKeyIn */
+        ApiKeyIn: {
+            /**
+             * Hours
+             * @default 24
+             */
+            hours: number;
+            /**
+             * Max Jobs
+             * @default 30
+             */
+            max_jobs: number;
+            /** Name */
+            name: string;
+        };
+        /** ApiKeyOut */
+        ApiKeyOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Id */
+            id: number;
+            /** Jobs Started */
+            jobs_started: number;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Max Jobs */
+            max_jobs: number;
+            /** Name */
+            name: string;
+            /** Prefix */
+            prefix: string;
+            /** Status */
+            status: string;
         };
         /** AuditOut */
         AuditOut: {
@@ -3145,6 +3254,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobOut"];
+                };
+            };
+        };
+    };
+    research_api_list_keys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyOut"][];
+                };
+            };
+        };
+    };
+    research_api_new_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApiKeyIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyCreated"];
+                };
+            };
+        };
+    };
+    research_api_revoke_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyOut"];
                 };
             };
         };

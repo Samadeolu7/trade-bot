@@ -120,3 +120,36 @@ class ShadowRebalance(models.Model):
 
     class Meta:
         ordering = ["-bar_time"]
+
+
+class ResearchApiKey(models.Model):
+    """A short-lived key that can only start and read research jobs, for
+    an automated client (e.g. a Claude session testing ideas). Created by
+    the owner, expires within a day, revocable, capped in jobs. Only a hash
+    of the key is stored; the key itself is shown once, at creation."""
+
+    MAX_HOURS = 24
+
+    name = models.CharField(max_length=80)
+    prefix = models.CharField(max_length=12, unique=True)
+    key_hash = models.CharField(max_length=64, unique=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    max_jobs = models.PositiveIntegerField(default=30)
+    jobs_started = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    @property
+    def status(self) -> str:
+        from django.utils import timezone
+
+        if self.revoked_at:
+            return "revoked"
+        if self.expires_at <= timezone.now():
+            return "expired"
+        return "active"

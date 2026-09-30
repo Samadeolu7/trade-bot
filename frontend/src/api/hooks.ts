@@ -28,6 +28,7 @@ export const keys = {
   experiments: (q: object) => ['experiments', q] as const,
   lifecycle: ['lifecycle'] as const,
   jobs: ['jobs'] as const,
+  researchKeys: ['research-keys'] as const,
   job: (id: number) => ['jobs', id] as const,
 }
 

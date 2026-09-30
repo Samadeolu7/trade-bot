@@ -14,6 +14,7 @@ from bot.broker.venues import VENUES
 from bot.strategy.registry import STRATEGY_CATALOG
 from core.audit import audit
 from market.candles import candles_df
+from research.keys import research_auth
 from trading.engine.loop import HEARTBEAT_KEY, QUOTE_KEY
 from trading.models import (
     MANUAL_BOOK,
@@ -511,7 +512,7 @@ class StrategyOut(Schema):
     defaults: dict
 
 
-@router.get("/strategies", response=list[StrategyOut])
+@router.get("/strategies", response=list[StrategyOut], auth=research_auth)
 def list_strategies(request, include_research: bool = False):
     """`include_research`: also the research-only options (pyramiding), for
     the research report form; bots can't use them."""

@@ -127,6 +127,160 @@
         "title": "AccountOut",
         "type": "object"
       },
+      "ApiKeyCreated": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "jobs_started": {
+            "title": "Jobs Started",
+            "type": "integer"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "max_jobs": {
+            "title": "Max Jobs",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "prefix": {
+            "title": "Prefix",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "prefix",
+          "status",
+          "created_at",
+          "expires_at",
+          "last_used_at",
+          "max_jobs",
+          "jobs_started",
+          "key"
+        ],
+        "title": "ApiKeyCreated",
+        "type": "object"
+      },
+      "ApiKeyIn": {
+        "properties": {
+          "hours": {
+            "default": 24,
+            "title": "Hours",
+            "type": "integer"
+          },
+          "max_jobs": {
+            "default": 30,
+            "title": "Max Jobs",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ApiKeyIn",
+        "type": "object"
+      },
+      "ApiKeyOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "jobs_started": {
+            "title": "Jobs Started",
+            "type": "integer"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "max_jobs": {
+            "title": "Max Jobs",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "prefix": {
+            "title": "Prefix",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "prefix",
+          "status",
+          "created_at",
+          "expires_at",
+          "last_used_at",
+          "max_jobs",
+          "jobs_started"
+        ],
+        "title": "ApiKeyOut",
+        "type": "object"
+      },
       "AuditOut": {
         "properties": {
           "account_id": {
@@ -2757,6 +2911,10 @@
       }
     },
     "securitySchemes": {
+      "ResearchKeyAuth": {
+        "scheme": "bearer",
+        "type": "http"
+      },
       "SessionAuth": {
         "in": "cookie",
         "name": "sessionid",
@@ -4833,6 +4991,9 @@
         },
         "security": [
           {
+            "ResearchKeyAuth": []
+          },
+          {
             "SessionAuth": []
           }
         ],
@@ -4923,6 +5084,9 @@
         },
         "security": [
           {
+            "ResearchKeyAuth": []
+          },
+          {
             "SessionAuth": []
           }
         ],
@@ -4957,6 +5121,9 @@
           }
         },
         "security": [
+          {
+            "ResearchKeyAuth": []
+          },
           {
             "SessionAuth": []
           }
@@ -4995,10 +5162,117 @@
         },
         "security": [
           {
+            "ResearchKeyAuth": []
+          },
+          {
             "SessionAuth": []
           }
         ],
         "summary": "Get Job",
+        "tags": [
+          "research"
+        ]
+      }
+    },
+    "/api/research/keys": {
+      "get": {
+        "operationId": "research_api_list_keys",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ApiKeyOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "List Keys",
+        "tags": [
+          "research"
+        ]
+      },
+      "post": {
+        "description": "Shows the key once; only its hash is kept.",
+        "operationId": "research_api_new_key",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyCreated"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "New Key",
+        "tags": [
+          "research"
+        ]
+      }
+    },
+    "/api/research/keys/{key_id}/revoke": {
+      "post": {
+        "operationId": "research_api_revoke_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "Revoke Key",
         "tags": [
           "research"
         ]
@@ -5026,6 +5300,9 @@
           }
         },
         "security": [
+          {
+            "ResearchKeyAuth": []
+          },
           {
             "SessionAuth": []
           }
@@ -5175,6 +5452,9 @@
           }
         },
         "security": [
+          {
+            "ResearchKeyAuth": []
+          },
           {
             "SessionAuth": []
           }

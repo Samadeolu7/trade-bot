@@ -1,10 +1,10 @@
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { client, unwrap } from '../api/client'
+import { client, unwrap, type Schemas } from '../api/client'
 import { keys, useMe, useUsers } from '../api/hooks'
 import { Button, Dialog, Empty, ErrorText, Field, Panel, inputClass } from '../components/ui'
 import { useSelectedAccount } from '../lib/account'
-import { ago, titleCase } from '../lib/format'
+import { ago, dateTime, titleCase } from '../lib/format'
 import { TwoFactorSetup } from './Login'
 
 function Password() {
@@ -209,6 +209,145 @@ function Users() {
   )
 }
 
+type ResearchKey = Schemas['ApiKeyOut']
+
+/** Short-lived keys that can only start and read research jobs, for an
+ *  automated client such as a Claude session testing ideas. */
+function ResearchKeys() {
+  const qc = useQueryClient()
+  const { data } = useQuery({ queryKey: keys.researchKeys, queryFn: () => unwrap(client.GET('/api/research/keys')) })
+  const [form, setForm] = useState({ name: 'claude', hours: 24, max_jobs: 30 })
+  const [created, setCreated] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const [error, setError] = useState<unknown>(null)
+
+  const create = async () => {
+    setError(null)
+    setCopied(false)
+    try {
+      const row = await unwrap(client.POST('/api/research/keys', { body: form }))
+      setCreated(row.key)
+      qc.invalidateQueries({ queryKey: keys.researchKeys })
+    } catch (err) {
+      setError(err)
+    }
+  }
+  const revoke = async (id: number) => {
+    setError(null)
+    try {
+      await unwrap(client.POST('/api/research/keys/{key_id}/revoke', { params: { path: { key_id: id } } }))
+      qc.invalidateQueries({ queryKey: keys.researchKeys })
+    } catch (err) {
+      setError(err)
+    }
+  }
+  const copy = async () => {
+    if (!created) return
+    try {
+      await navigator.clipboard.writeText(created)
+      setCopied(true)
+    } catch {
+      /* clipboard blocked; the key is still selectable */
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="max-w-2xl text-[13px] text-ink-2">
+        A research key can start research jobs and read their results, experiments and the strategy list. Nothing
+        else: no bots, orders, accounts, users or alerts. It expires within a day and can be revoked here at any time.
+      </p>
+      {created && (
+        <div className="max-w-2xl space-y-2 rounded-md border border-line-strong p-3">
+          <div className="text-[13px] font-semibold">Copy this key now. It won't be shown again.</div>
+          <code className="block select-all break-all rounded bg-sunken p-2 text-[13px]">{created}</code>
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={copy}>
+              {copied ? 'Copied' : 'Copy'}
+            </Button>
+            <Button size="sm" onClick={() => setCreated(null)}>
+              Done
+            </Button>
+          </div>
+          <p className="text-[12px] text-ink-2">
+            Use it as <code>Authorization: Bearer &lt;key&gt;</code> on <code>/api/research/jobs</code>.
+          </p>
+        </div>
+      )}
+      {data?.length ? (
+        <div className="overflow-x-auto">
+          <table className="data">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Key</th>
+                <th>Status</th>
+                <th>Expires</th>
+                <th className="r">Jobs</th>
+                <th>Last used</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {(data as ResearchKey[]).map((k) => (
+                <tr key={k.id} className={k.status === 'active' ? '' : 'text-muted'}>
+                  <td className="font-semibold">{k.name}</td>
+                  <td>
+                    <code>rk_{k.prefix}_…</code>
+                  </td>
+                  <td>{titleCase(k.status)}</td>
+                  <td className="text-ink-2">{dateTime(k.expires_at)}</td>
+                  <td className="num r">
+                    {k.jobs_started} / {k.max_jobs}
+                  </td>
+                  <td className="text-ink-2">{k.last_used_at ? ago(k.last_used_at) : 'Never'}</td>
+                  <td className="r">
+                    {k.status === 'active' && (
+                      <Button size="sm" variant="danger" onClick={() => revoke(k.id)}>
+                        Revoke
+                      </Button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <Empty>No research keys yet.</Empty>
+      )}
+      <div className="grid max-w-2xl gap-3 border-t border-line pt-4 md:grid-cols-[1fr_auto_auto_auto] md:items-end">
+        <Field label="Name">
+          <input className={inputClass} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        </Field>
+        <Field label="Expires after">
+          <select className={inputClass} value={form.hours} onChange={(e) => setForm({ ...form, hours: Number(e.target.value) })}>
+            {[1, 6, 12, 24].map((h) => (
+              <option key={h} value={h}>
+                {h === 1 ? '1 hour' : `${h} hours`}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Max jobs">
+          <input
+            className={`${inputClass} w-24`}
+            type="number"
+            min={1}
+            max={200}
+            value={form.max_jobs}
+            onChange={(e) => setForm({ ...form, max_jobs: Number(e.target.value) })}
+          />
+        </Field>
+        <Button variant="primary" disabled={!form.name.trim()} onClick={create}>
+          Create key
+        </Button>
+      </div>
+      <ErrorText error={error} />
+    </div>
+  )
+}
+
 function ThemeChoice() {
   const [theme, setTheme] = useState(() => {
     try {
@@ -253,6 +392,11 @@ export default function Settings() {
       {me?.role === 'owner' && (
         <Panel title="Users and access">
           <Users />
+        </Panel>
+      )}
+      {me?.role === 'owner' && (
+        <Panel title="Research API keys">
+          <ResearchKeys />
         </Panel>
       )}
     </div>
