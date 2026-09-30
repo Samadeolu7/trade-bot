@@ -1858,6 +1858,41 @@
         "title": "PasswordIn",
         "type": "object"
       },
+      "PortfolioJobIn": {
+        "properties": {
+          "params": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Params",
+            "type": "object"
+          },
+          "pool": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Pool",
+            "type": "array"
+          },
+          "sizes": {
+            "default": [
+              10
+            ],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Sizes",
+            "type": "array"
+          },
+          "timeframe": {
+            "default": "4h",
+            "title": "Timeframe",
+            "type": "string"
+          }
+        },
+        "title": "PortfolioJobIn",
+        "type": "object"
+      },
       "PositionOut": {
         "properties": {
           "account_id": {
@@ -5370,6 +5405,47 @@
           }
         ],
         "summary": "Set Lifecycle",
+        "tags": [
+          "research"
+        ]
+      }
+    },
+    "/api/research/portfolio-jobs": {
+      "post": {
+        "description": "A rotational multi-coin donchian_ensemble backtest on the usual\ntrain/test windows (holdout excluded).",
+        "operationId": "research_api_create_portfolio_job",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioJobIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "ResearchKeyAuth": []
+          },
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "Create Portfolio Job",
         "tags": [
           "research"
         ]

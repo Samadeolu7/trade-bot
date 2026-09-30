@@ -849,6 +849,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/research/portfolio-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Portfolio Job
+         * @description A rotational multi-coin donchian_ensemble backtest on the usual
+         *     train/test windows (holdout excluded).
+         */
+        post: operations["research_api_create_portfolio_job"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/research/shadow-history": {
         parameters: {
             query?: never;
@@ -1695,6 +1716,33 @@ export interface components {
             current_password: string;
             /** New Password */
             new_password: string;
+        };
+        /** PortfolioJobIn */
+        PortfolioJobIn: {
+            /**
+             * Params
+             * @default {}
+             */
+            params: {
+                [key: string]: unknown;
+            };
+            /**
+             * Pool
+             * @default []
+             */
+            pool: string[];
+            /**
+             * Sizes
+             * @default [
+             *       10
+             *     ]
+             */
+            sizes: number[];
+            /**
+             * Timeframe
+             * @default 4h
+             */
+            timeframe: string;
         };
         /** PositionOut */
         PositionOut: {
@@ -3384,6 +3432,30 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LifecycleOut"];
+                };
+            };
+        };
+    };
+    research_api_create_portfolio_job: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortfolioJobIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobOut"];
                 };
             };
         };
