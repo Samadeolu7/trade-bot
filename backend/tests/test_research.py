@@ -197,3 +197,16 @@ def test_pyramid_options_without_adds_are_refused():
 def test_pyramid_max_adds_must_be_a_whole_number():
     with pytest.raises(JobError, match="whole number"):
         validate_params("research_report", {"strategy": "donchian", "params": {"pyramid.max_adds": [2.5]}})
+
+
+def test_variants_differing_only_in_inert_pyramid_options_are_computed_once(owner):
+    _donchian_history()
+    job = _run(owner, {"pyramid.max_adds": [0, 1], "pyramid.add_step_pct": [0, 0.02]})
+    labels = [r["label"] for r in job.result["runs"]]
+    same = [r for r in job.result["runs"] if "(same as" in r["label"]]
+    # max_adds=0 with step 0.02 is the same computation as max_adds=0 with step 0
+    assert len(same) == 1 and "max_adds=0" in same[0]["label"], labels
+    first = next(r for r in job.result["runs"] if r["label"] == same[0]["label"].split(" (same as ")[1].rstrip(")"))
+    assert same[0]["windows"] == first["windows"]
+    # three distinct variants plus the baseline, two windows each
+    assert Experiment.objects.filter(job=job).count() == 8

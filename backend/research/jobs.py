@@ -62,11 +62,21 @@ def run_key(strategy: str, symbol: str, timeframe: str, strategy_config: dict, b
     key means the same computation on the same data windows."""
     identity = {
         "strategy": strategy, "symbol": symbol, "timeframe": timeframe,
-        "config": strategy_config, "backtest": backtest_config,
+        "config": _effective_config(strategy_config), "backtest": backtest_config,
         "train": TRAIN, "test_start": TEST_START, "holdout_start": holdout_start,
         "code": code_version(),
     }
     return hashlib.sha256(json.dumps(identity, sort_keys=True, default=str).encode()).hexdigest()[:24]
+
+
+def _effective_config(strategy_config: dict) -> dict:
+    """Drops settings that can't affect the result, so variants that only
+    differ in those count as the same run: with pyramiding off (max_adds
+    0), the other pyramid options do nothing."""
+    pyramid = strategy_config.get("pyramid") or {}
+    if pyramid and not int(pyramid.get("max_adds", 0) or 0):
+        return {**strategy_config, "pyramid": {"max_adds": 0}}
+    return strategy_config
 
 
 def variants(params: dict, base_config: dict) -> list[tuple[str, dict]]:
@@ -267,11 +277,17 @@ def run_research_report(params: dict, fetch: bool = True, job: ResearchJob | Non
     ]
     earlier = earlier_runs([key for _, _, key in keyed])
     runs = []
+    computed: dict[str, tuple[str, dict]] = {}  # run_key -> (label, result) within this job
     for label, strategy_config, key in keyed:
         if key in earlier:
             runs.append({"label": f"{label} (earlier result)", "baseline": False, **reuse(earlier[key])})
+        elif key in computed:
+            first_label, result = computed[key]
+            runs.append({"label": f"{label} (same as {first_label})", "baseline": False, **result})
         else:
-            runs.append({"label": label, "baseline": False, **run(params["strategy"], strategy_config)})
+            result = run(params["strategy"], strategy_config)
+            computed[key] = (label, result)
+            runs.append({"label": label, "baseline": False, **result})
     if params["baseline"] != "none":
         runs.append({"label": f"baseline: {params['baseline']}", "baseline": True,
                      **run(params["baseline"], base_config)})
