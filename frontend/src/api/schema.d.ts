@@ -700,6 +700,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/recommendations/feeds/{feed_id}/sizing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Sizing
+         * @description Lets alerts give exact MT5 lot sizes for this feed.
+         */
+        post: operations["recommendations_api_set_sizing"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/research/experiments": {
         parameters: {
             query?: never;
@@ -1393,6 +1413,12 @@ export interface components {
         };
         /** FeedOut */
         FeedOut: {
+            /** Capital */
+            capital: number | null;
+            /** Contract Size */
+            contract_size: number;
+            /** Current Capital */
+            current_capital: number | null;
             /** Direction */
             direction: string;
             /** Enabled */
@@ -1411,12 +1437,20 @@ export interface components {
             last_bar_at: string | null;
             /** Last Run At */
             last_run_at: string | null;
+            /** Lot Step */
+            lot_step: number;
+            /** Lots Held */
+            lots_held: number;
+            /** Min Lot */
+            min_lot: number;
             /** Name */
             name: string;
             /** Near Miss */
             near_miss: string | null;
             /** Open Pnl Pct */
             open_pnl_pct: number | null;
+            /** Risk Pct */
+            risk_pct: number;
             /** Status Reason */
             status_reason: string;
             /** Stop */
@@ -1978,6 +2012,33 @@ export interface components {
             symbol: string;
             /** Timeframe */
             timeframe: string;
+        };
+        /** SizingIn */
+        SizingIn: {
+            /** Capital */
+            capital?: number | null;
+            /**
+             * Contract Size
+             * @default 1
+             */
+            contract_size: number;
+            /**
+             * Lot Step
+             * @default 0.01
+             */
+            lot_step: number;
+            /** Lots Held */
+            lots_held?: number | null;
+            /**
+             * Min Lot
+             * @default 0.01
+             */
+            min_lot: number;
+            /**
+             * Risk Pct
+             * @default 0.01
+             */
+            risk_pct: number;
         };
         /** StrategyOut */
         StrategyOut: {
@@ -3172,6 +3233,32 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["EnabledIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedOut"];
+                };
+            };
+        };
+    };
+    recommendations_api_set_sizing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feed_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SizingIn"];
             };
         };
         responses: {

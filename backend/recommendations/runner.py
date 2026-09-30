@@ -21,6 +21,7 @@ from bot.data.sentiment import fetch_fear_greed_index
 from bot.shadow.runner import drop_incomplete_bar
 from bot.strategy.registry import build_strategy
 from market.candles import candles_df, funding_df
+from recommendations.messages import describe
 from recommendations.models import Feed, Recommendation
 from trading.engine.adapters import jsonable
 from trading.services.bots import strategy_config_with
@@ -71,7 +72,7 @@ def _evaluate_signal(feed: Feed, strategy, df: pd.DataFrame, bar_time) -> list[R
         if new_stop != feed.stop:
             events.append(Recommendation(
                 feed=feed, kind=Recommendation.Kind.STOP_UPDATE, bar_time=bar_time, direction=feed.direction,
-                price=float(bar["close"]), stop=float(new_stop),
+                price=float(bar["close"]), stop=float(new_stop), context={"old_stop": float(feed.stop)},
                 reason=f"trailing stop moved from {_fmt(feed.stop)} to {_fmt(new_stop)}",
             ))
             feed.stop = float(new_stop)
@@ -157,6 +158,16 @@ def _near_miss(feed: Feed, diagnosis: dict, bar_time, price: float) -> Recommend
 def _alert(event: Recommendation) -> None:
     feed = event.feed
     pair = _pair(feed)
+    if event.kind in (Recommendation.Kind.ENTRY, Recommendation.Kind.STOP_UPDATE, Recommendation.Kind.EXIT,
+                      Recommendation.Kind.REBALANCE):
+        lots_before = feed.lots_held
+        message = describe(feed, event, feed.last_diagnosis)
+        if feed.lots_held != lots_before:
+            feed.save(update_fields=["lots_held"])
+        if message is not None:
+            title, body = message
+            notify(AlertRule.Kind.RECOMMENDATION, title, body + "\nAdvisory only; no order placed.")
+        return
     if event.kind == Recommendation.Kind.ENTRY:
         title = f"MT5: {event.direction} {pair} ({feed.name}, {feed.timeframe})"
         body = f"Entry {_fmt(event.price)}, stop {_fmt(event.stop)}"

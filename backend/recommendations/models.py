@@ -16,6 +16,23 @@ class Feed(models.Model):
     fee = models.FloatField(default=0.0)
     slippage = models.FloatField(default=0.0003)
     enabled = models.BooleanField(default=True)
+
+    # MT5 sizing, so alerts can say exactly how many lots to trade: your
+    # account balance for this feed (USD) and the symbol's contract spec as
+    # shown in MT5's symbol specification (Exness BTCUSD: 1 lot = 1 BTC,
+    # 0.01 minimum and step)
+    capital = models.FloatField(null=True, blank=True)
+    # feed.equity when capital was set: exposure feeds grow or shrink your
+    # capital with the feed's own profit and loss since then
+    capital_equity_base = models.FloatField(null=True, blank=True)
+    contract_size = models.FloatField(default=1.0)
+    min_lot = models.FloatField(default=0.01)
+    lot_step = models.FloatField(default=0.01)
+    # risk per trade for position feeds, as a fraction of capital
+    risk_pct = models.FloatField(default=0.01)
+    # lots the alerts have told you to hold (exposure feeds) or opened
+    # (position feeds), so each alert's lot change is exact
+    lots_held = models.FloatField(default=0.0)
     last_bar_at = models.DateTimeField(null=True, blank=True)
     last_run_at = models.DateTimeField(null=True, blank=True)
     status_reason = models.CharField(max_length=300, blank=True)
@@ -45,6 +62,17 @@ class Feed(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+    @property
+    def current_capital(self) -> float | None:
+        """Your capital for this feed now, in USD: exposure feeds grow or
+        shrink it with the feed's tracked equity since it was set; position
+        feeds keep it as entered."""
+        if not self.capital:
+            return None
+        if self.capital_equity_base and self.strategy == "donchian_ensemble":
+            return self.capital * self.equity / self.capital_equity_base
+        return self.capital
 
 
 class Recommendation(models.Model):

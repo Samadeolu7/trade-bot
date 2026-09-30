@@ -32,6 +32,13 @@ class FeedOut(Schema):
     last_bar_at: datetime | None
     last_run_at: datetime | None
     status_reason: str
+    capital: float | None
+    current_capital: float | None
+    contract_size: float
+    min_lot: float
+    lot_step: float
+    risk_pct: float
+    lots_held: float
 
 
 def _mid(symbol: str) -> float | None:
@@ -58,6 +65,8 @@ def _feed_out(feed: Feed, prices: dict) -> dict:
         "equity": feed.equity,
         "near_miss": (d.get("near_miss_reason") or d.get("near_miss_key")) if d.get("near_miss") else None,
         "last_bar_at": feed.last_bar_at, "last_run_at": feed.last_run_at, "status_reason": feed.status_reason,
+        "capital": feed.capital, "current_capital": feed.current_capital, "contract_size": feed.contract_size,
+        "min_lot": feed.min_lot, "lot_step": feed.lot_step, "risk_pct": feed.risk_pct, "lots_held": feed.lots_held,
     }
 
 
@@ -80,6 +89,47 @@ def set_enabled(request, feed_id: int, payload: EnabledIn):
     feed.enabled = payload.enabled
     feed.save(update_fields=["enabled"])
     audit("recommendations.enabled", request=request, target=f"feed:{feed.name}", enabled=payload.enabled)
+    return _feed_out(feed, {})
+
+
+class SizingIn(Schema):
+    # your MT5 balance for this feed, in USD; null clears it
+    capital: float | None = None
+    contract_size: float = 1.0
+    min_lot: float = 0.01
+    lot_step: float = 0.01
+    risk_pct: float = 0.01
+    # the lots you actually hold for this feed right now (usually leave as is)
+    lots_held: float | None = None
+
+
+@router.post("/feeds/{feed_id}/sizing", response=FeedOut)
+def set_sizing(request, feed_id: int, payload: SizingIn):
+    """Lets alerts give exact MT5 lot sizes for this feed."""
+    require_owner(request)
+    feed = Feed.objects.filter(pk=feed_id).first()
+    if feed is None:
+        raise HttpError(404, "no such feed")
+    if payload.capital is not None and payload.capital <= 0:
+        raise HttpError(400, "capital must be above 0")
+    if payload.contract_size <= 0 or payload.min_lot <= 0 or payload.lot_step <= 0:
+        raise HttpError(400, "contract size, minimum lot and lot step must be above 0")
+    if not 0 < payload.risk_pct <= 0.05:
+        raise HttpError(400, "risk per trade must be between 0 and 5%")
+    feed.capital = payload.capital
+    # amounts from here on scale with the feed's own profit and loss
+    feed.capital_equity_base = feed.equity if payload.capital else None
+    feed.contract_size, feed.min_lot, feed.lot_step = payload.contract_size, payload.min_lot, payload.lot_step
+    feed.risk_pct = payload.risk_pct
+    if payload.lots_held is not None:
+        if payload.lots_held < 0:
+            raise HttpError(400, "lots held can't be negative")
+        feed.lots_held = payload.lots_held
+    feed.save(update_fields=["capital", "capital_equity_base", "contract_size", "min_lot", "lot_step",
+                             "risk_pct", "lots_held"])
+    audit("recommendations.sizing", request=request, target=f"feed:{feed.name}", capital=payload.capital,
+          contract_size=payload.contract_size, min_lot=payload.min_lot, risk_pct=payload.risk_pct,
+          lots_held=feed.lots_held)
     return _feed_out(feed, {})
 
 

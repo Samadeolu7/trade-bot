@@ -972,6 +972,32 @@
       },
       "FeedOut": {
         "properties": {
+          "capital": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capital"
+          },
+          "contract_size": {
+            "title": "Contract Size",
+            "type": "number"
+          },
+          "current_capital": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Capital"
+          },
           "direction": {
             "title": "Direction",
             "type": "string"
@@ -1039,6 +1065,18 @@
             ],
             "title": "Last Run At"
           },
+          "lot_step": {
+            "title": "Lot Step",
+            "type": "number"
+          },
+          "lots_held": {
+            "title": "Lots Held",
+            "type": "number"
+          },
+          "min_lot": {
+            "title": "Min Lot",
+            "type": "number"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -1064,6 +1102,10 @@
               }
             ],
             "title": "Open Pnl Pct"
+          },
+          "risk_pct": {
+            "title": "Risk Pct",
+            "type": "number"
           },
           "status_reason": {
             "title": "Status Reason",
@@ -1127,7 +1169,14 @@
           "near_miss",
           "last_bar_at",
           "last_run_at",
-          "status_reason"
+          "status_reason",
+          "capital",
+          "current_capital",
+          "contract_size",
+          "min_lot",
+          "lot_step",
+          "risk_pct",
+          "lots_held"
         ],
         "title": "FeedOut",
         "type": "object"
@@ -2552,6 +2601,54 @@
           "exit_reason"
         ],
         "title": "ShadowTradeOut",
+        "type": "object"
+      },
+      "SizingIn": {
+        "properties": {
+          "capital": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capital"
+          },
+          "contract_size": {
+            "default": 1.0,
+            "title": "Contract Size",
+            "type": "number"
+          },
+          "lot_step": {
+            "default": 0.01,
+            "title": "Lot Step",
+            "type": "number"
+          },
+          "lots_held": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lots Held"
+          },
+          "min_lot": {
+            "default": 0.01,
+            "title": "Min Lot",
+            "type": "number"
+          },
+          "risk_pct": {
+            "default": 0.01,
+            "title": "Risk Pct",
+            "type": "number"
+          }
+        },
+        "title": "SizingIn",
         "type": "object"
       },
       "StrategyOut": {
@@ -4934,6 +5031,54 @@
           }
         ],
         "summary": "Set Enabled",
+        "tags": [
+          "recommendations"
+        ]
+      }
+    },
+    "/api/recommendations/feeds/{feed_id}/sizing": {
+      "post": {
+        "description": "Lets alerts give exact MT5 lot sizes for this feed.",
+        "operationId": "recommendations_api_set_sizing",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feed_id",
+            "required": true,
+            "schema": {
+              "title": "Feed Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SizingIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "Set Sizing",
         "tags": [
           "recommendations"
         ]

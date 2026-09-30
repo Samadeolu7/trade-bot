@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Fragment, useState } from 'react'
 import { client, unwrap, type Schemas } from '../api/client'
 import { useMe } from '../api/hooks'
-import { Empty, ErrorText, Panel, inputClass } from '../components/ui'
+import { Button, Dialog, Empty, ErrorText, Field, Panel, inputClass } from '../components/ui'
 import { ago, dateTime, money, pct, titleCase } from '../lib/format'
 
 type Feed = Schemas['FeedOut']
@@ -23,6 +23,87 @@ function Call({ feed }: { feed: Feed }) {
   )
 }
 
+/** Your MT5 balance and the symbol's contract spec, so alerts can say
+ *  exactly how many lots to buy or close. */
+function SizingDialog({ feed, onClose }: { feed: Feed; onClose: () => void }) {
+  const qc = useQueryClient()
+  const [form, setForm] = useState({
+    capital: feed.capital != null ? String(feed.capital) : '',
+    contract_size: String(feed.contract_size),
+    min_lot: String(feed.min_lot),
+    lot_step: String(feed.lot_step),
+    risk_pct: String(feed.risk_pct * 100),
+    lots_held: String(feed.lots_held),
+  })
+  const [error, setError] = useState<unknown>(null)
+  const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value })
+  const save = async () => {
+    setError(null)
+    try {
+      await unwrap(
+        client.POST('/api/recommendations/feeds/{feed_id}/sizing', {
+          params: { path: { feed_id: feed.id } },
+          body: {
+            capital: form.capital.trim() ? Number(form.capital) : null,
+            contract_size: Number(form.contract_size),
+            min_lot: Number(form.min_lot),
+            lot_step: Number(form.lot_step),
+            risk_pct: Number(form.risk_pct) / 100,
+            lots_held: Number(form.lots_held),
+          },
+        }),
+      )
+      qc.invalidateQueries({ queryKey: keys.feeds })
+      onClose()
+    } catch (err) {
+      setError(err)
+    }
+  }
+  const exposure = feed.kind === 'exposure'
+  return (
+    <Dialog open title={`Lot sizing: ${feed.name}`} onClose={onClose}>
+      <div className="space-y-3">
+        <p className="text-[13px] text-ink-2">
+          Alerts use these to tell you exactly how many lots to buy, close or protect with a stop loss in MT5. Check
+          the contract size, minimum lot and step in MT5: right-click the symbol, Specification.
+        </p>
+        <Field label="Your MT5 balance for this strategy (USD)" hint="Leave empty for percentages only.">
+          <input className={inputClass} type="number" min={0} value={form.capital} onChange={set('capital')} />
+        </Field>
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="Contract size" hint="Units per lot (Exness BTCUSD: 1)">
+            <input className={inputClass} type="number" value={form.contract_size} onChange={set('contract_size')} />
+          </Field>
+          <Field label="Minimum lot">
+            <input className={inputClass} type="number" value={form.min_lot} onChange={set('min_lot')} />
+          </Field>
+          <Field label="Lot step">
+            <input className={inputClass} type="number" value={form.lot_step} onChange={set('lot_step')} />
+          </Field>
+        </div>
+        {!exposure && (
+          <Field label="Risk per trade (%)" hint="How much of your balance a stop loss may lose.">
+            <input className={inputClass} type="number" value={form.risk_pct} onChange={set('risk_pct')} />
+          </Field>
+        )}
+        <Field
+          label="Lots you hold for this strategy now"
+          hint="Alerts track this themselves; only change it if your MT5 position differs."
+        >
+          <input className={inputClass} type="number" min={0} value={form.lots_held} onChange={set('lots_held')} />
+        </Field>
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" onClick={save}>
+            Save
+          </Button>
+        </div>
+        <ErrorText error={error} />
+      </div>
+    </Dialog>
+  )
+}
+
 function Feeds() {
   const qc = useQueryClient()
   const { data: me } = useMe()
@@ -31,6 +112,7 @@ function Feeds() {
     queryFn: () => unwrap(client.GET('/api/recommendations/feeds')),
     refetchInterval: 30_000,
   })
+  const [sizing, setSizing] = useState<Feed | null>(null)
   const toggle = useMutation({
     mutationFn: (f: Feed) =>
       unwrap(
@@ -61,6 +143,7 @@ function Feeds() {
             <th>Since</th>
             <th>Near miss</th>
             <th>Checked</th>
+            <th className="r">Your balance</th>
             {me?.role === 'owner' && <th>On</th>}
           </tr>
         </thead>
@@ -87,6 +170,18 @@ function Feeds() {
               <td className="text-ink-2" title={f.status_reason}>
                 {f.status_reason || ago(f.last_run_at)}
               </td>
+              <td className="num r">
+                {f.current_capital != null ? (
+                  <span title={`${f.lots_held} lots held`}>{money(f.current_capital)}</span>
+                ) : (
+                  <span className="text-muted">—</span>
+                )}
+                {me?.role === 'owner' && (
+                  <Button size="sm" className="ml-2" onClick={() => setSizing(f)}>
+                    Lot sizing
+                  </Button>
+                )}
+              </td>
               {me?.role === 'owner' && (
                 <td>
                   <input
@@ -103,6 +198,7 @@ function Feeds() {
         </tbody>
       </table>
       <ErrorText error={toggle.error} />
+      {sizing && <SizingDialog feed={sizing} onClose={() => setSizing(null)} />}
     </div>
   )
 }
