@@ -4,12 +4,12 @@ paper trades and rebalances. Safe to re-run: rows are matched on their
 natural keys or original ids."""
 
 import json
-import sqlite3
 from datetime import datetime, timezone
 
 from django.core.management.base import BaseCommand
 
 from market.candles import upsert_candles
+from research.legacy import open_legacy_db
 from market.models import FundingRate
 from research.models import Experiment, ShadowRebalance, ShadowTrade, StrategyLifecycle
 
@@ -33,11 +33,11 @@ class Command(BaseCommand):
     help = "Import data/trades.db (the CLI's SQLite database) into the platform database."
 
     def add_arguments(self, parser):
-        parser.add_argument("path", nargs="?", default="../data/trades.db")
+        parser.add_argument("path", nargs="?", default="/legacy/trades.db")
         parser.add_argument("--skip-candles", action="store_true")
 
     def handle(self, *args, path, skip_candles=False, **options):
-        conn = sqlite3.connect(path)
+        conn = open_legacy_db(path)
         report = []
 
         if not skip_candles and _has_table(conn, "candles"):

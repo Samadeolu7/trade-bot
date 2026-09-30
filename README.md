@@ -71,22 +71,23 @@ After changing the API, `cd frontend; npm run api` regenerates the typed client.
 Tests: `python -m pytest tests` (library), `cd backend; python -m pytest` (platform), `cd frontend;
 npm test`.
 
-### Deploying and the Koya cutover
+### Deploying
 
 The `platform-*` services in `docker-compose.yml` deploy with everything else on push to `master`. The
 server's `.env` needs `DJANGO_SECRET_KEY` and `POSTGRES_PASSWORD` (see `.env.example`), or the deploy
 stops before touching anything.
 
-The Koya lead scorer currently owns `leads.yincools.com.ng` in Traefik, so it has to go first:
+Cutover from the Koya lead scorer and the CLI's containers (done 2026-09-29/30):
 
-1. On the server: `cd /opt/koya-leads && docker compose down`, so its router releases the host.
-2. Push to `master` (or run the deploy workflow). Traefik issues the certificate for the new routers.
-3. `docker compose exec platform-web python manage.py createsuperuser`, set its role to owner in
-   `/admin`, sign in and set up the authenticator app.
-4. Copy the shadow runs' SQLite database into the web container (`docker compose cp`) and run
-   `python manage.py import_sqlite <path>`, so experiments, lifecycle stages and shadow history carry over.
-5. Recreate the deployed shadow configurations as paper bots, run both side by side for about a week,
-   then remove the shadow and recommend services from `docker-compose.yml`.
+1. Koya was taken down so the platform could take over `leads.yincools.com.ng` in Traefik.
+2. The shadow-run and recommend containers were retired. Their SQLite volume (`trade_bot_data`) is
+   kept and mounted read-only at `/legacy` in `platform-web`.
+3. The "Seed platform from shadow runs" workflow ran `import_sqlite` and `seed_shadow_bots` against it,
+   bringing over history, the six shadow runs as paper bots and the recommend feed as recommendation
+   feeds, each continuing from its last position.
+
+The CLI itself still works for research on the server: `docker compose run --rm cli python main.py ...`
+(the Research Report workflow uses this).
 
 ## Phase 1 — Data Layer
 

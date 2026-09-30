@@ -30,6 +30,7 @@ from bot.backtest.engine import position_size
 from bot.broker.base import BrokerFill, OrderResult
 from core.models import User
 from recommendations.models import Feed, Recommendation
+from research.legacy import open_legacy_db
 from trading.models import Bot, BotDecision, Order, TradingAccount
 from trading.services.bots import create_bot, set_bot_status, trade_bot_config
 from trading.services.brokers import DbPaperStore
@@ -85,7 +86,7 @@ class Command(BaseCommand):
         user = User.objects.filter(username=owner).first()
         if user is None:
             raise CommandError(f"no user {owner!r}")
-        conn = sqlite3.connect(sqlite_path)
+        conn = open_legacy_db(sqlite_path)
         self._seed_bots(conn, user, account, per_bot, manual)
         self._seed_feeds(conn)
 

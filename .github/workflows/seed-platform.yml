@@ -1,7 +1,7 @@
-# One-off: bring the shadow runs into the web platform. Copies their history
-# (import_sqlite) and recreates them as paper bots that continue from their
-# current positions (seed_shadow_bots). Safe to re-run. Delete this workflow
-# once it has run.
+# One-off: bring the retired CLI runs into the web platform. Copies their
+# history (import_sqlite) and recreates the shadow runs as paper bots and the
+# recommend feed as recommendation feeds, continuing from their last positions
+# (seed_shadow_bots). Safe to re-run. Delete this workflow once it has run.
 name: Seed platform from shadow runs
 
 on:
@@ -36,20 +36,13 @@ jobs:
           script: |
             set -e
             cd ${{ env.DEPLOY_PATH }}
-
-            echo "==> Snapshotting the shadow runs' database (consistent copy of a live file)"
-            docker compose exec -T trade-bot python -c "import sqlite3; s = sqlite3.connect('data/trades.db'); d = sqlite3.connect('/tmp/shadow-snapshot.db'); s.backup(d); d.close()"
-            docker compose cp trade-bot:/tmp/shadow-snapshot.db /tmp/shadow-snapshot.db
-            docker compose exec -T trade-bot rm -f /tmp/shadow-snapshot.db
-            docker compose cp /tmp/shadow-snapshot.db platform-web:/tmp/shadow-snapshot.db
-            docker compose exec -T -u root platform-web chown appuser /tmp/shadow-snapshot.db
-            rm -f /tmp/shadow-snapshot.db
+            # the retired CLI runs' database is mounted read-only at /legacy
+            # in the web container (docker-compose.yml); nothing writes to it
+            # any more, so it's read in place
 
             echo "==> Importing history (candles, funding, experiments, stages, shadow trades)"
-            docker compose exec -T platform-web python manage.py import_sqlite /tmp/shadow-snapshot.db
+            docker compose exec -T platform-web python manage.py import_sqlite /legacy/trades.db
 
-            echo "==> Recreating the shadow runs as paper bots"
-            docker compose exec -T platform-web python manage.py seed_shadow_bots /tmp/shadow-snapshot.db --owner "$OWNER"
-
-            docker compose exec -T platform-web rm -f /tmp/shadow-snapshot.db
+            echo "==> Recreating the shadow runs as paper bots and the recommend feed (only what's missing)"
+            docker compose exec -T platform-web python manage.py seed_shadow_bots /legacy/trades.db --owner "$OWNER"
             echo "==> Done"
