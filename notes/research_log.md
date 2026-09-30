@@ -32,3 +32,24 @@ donchian_ensemble 4h with rebalance_threshold 0.1: test Sharpe 0.90, return
   30/55/100.
 - C. Donchian ATR trailing exit: atr_mult 2/3/4.
 - D. Regime filters on 4h: adx / sma200 / natr.
+
+**Batch 1 results (jobs 6–9, BTC 4h), train Sharpe → test Sharpe:**
+- A. Ensemble vol_target 0.25 / 0.4 / 0.6: 1.45→0.90, 1.38→0.91, 1.23→0.81.
+  Test DD -12.1 / -18.9 / -22.5%. A risk dial, not an edge; by train, 0.25 stays.
+- B. Donchian grid: the best train cells (exit 100: 1.27–1.29) have *negative*
+  test Sharpe (-0.27). Only exit 55 holds across entry periods on test
+  (0.90 / 0.61 / 0.67). Train and test rankings are roughly inverted, a
+  regime shift from 2020–21's long trends to choppier 2024–26. No variant
+  qualifies under rule 1. The deployed 20/55 sits on the only stable ridge.
+- C. ATR exit: mult 2 → -1.43/-1.90, mult 3 → 0.54/0.76, mult 4 → 1.29/0.05.
+  Chosen by train it's 4, which fails. Rejected.
+- D. Regime filters: adx 0.94/0.44, sma200 0.90/0.54, natr 1.54/0.36. All
+  trail plain donchian on test. Rejected.
+- Also re-read (user's job 5, pyramid): train Sharpe falls with adds
+  (1.57→1.40), test rises (0.52→0.81). By train, no adds. Rejected.
+
+**Batch 2: does the untuned ensemble generalise across coins?** Same config
+(4h, bars_per_day 6, threshold 0.1, vol_target 0.25) on ETH, SOL, BNB, XRP,
+ADA, DOGE. This is the paper's own route to Sharpe >1.5: breadth, not
+tuning. Success means positive test Sharpe on most coins. Then a
+multi-coin portfolio is the candidate.
