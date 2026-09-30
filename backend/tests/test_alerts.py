@@ -137,3 +137,18 @@ def test_alerts_stay_until_dismissed(owner):
     client.post("/api/alerts/events/dismiss-all")
     assert client.get("/api/alerts/events?active=true").json() == []
     assert len(client.get("/api/alerts/events").json()) == 2  # still in the log
+
+
+def test_repeating_price_alert_fires_again_after_cooldown(owner):
+    rule = AlertRule.objects.create(user=owner, kind="price_above", cooldown_minutes=15,
+                                    params={"venue": KEY[0], "symbol": KEY[1], "price": 100})
+    history = PriceHistory()
+    evaluate_prices({KEY: D(99)}, history, T0)
+    assert evaluate_prices({KEY: D(101)}, history, T0) == 1
+    evaluate_prices({KEY: D(99)}, history, T0 + timedelta(minutes=5))
+    # crossing again inside the cooldown: stays quiet, rule stays on
+    assert evaluate_prices({KEY: D(101)}, history, T0 + timedelta(minutes=6)) == 0
+    evaluate_prices({KEY: D(99)}, history, T0 + timedelta(minutes=20))
+    assert evaluate_prices({KEY: D(101)}, history, T0 + timedelta(minutes=21)) == 1
+    rule.refresh_from_db()
+    assert rule.enabled is True

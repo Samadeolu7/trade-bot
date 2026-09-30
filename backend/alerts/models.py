@@ -31,7 +31,8 @@ class AlertRule(models.Model):
     bot = models.ForeignKey("trading.Bot", null=True, blank=True, on_delete=models.CASCADE, related_name="+")
     note = models.CharField(max_length=200, blank=True)
     enabled = models.BooleanField(default=True)
-    # price levels fire once and switch off, like a TradingView "once" alert
+    # fire once and then switch off (TradingView's "Only once"); off by
+    # default, so an alert keeps working until its owner turns it off
     once = models.BooleanField(default=False)
     cooldown_minutes = models.PositiveIntegerField(default=0)
     last_fired_at = models.DateTimeField(null=True, blank=True)

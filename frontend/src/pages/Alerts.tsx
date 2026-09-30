@@ -10,8 +10,8 @@ import { ago, dateTime, money } from '../lib/format'
 type Rule = Schemas['RuleOut']
 
 const KINDS: { value: string; label: string; help: string }[] = [
-  { value: 'price_above', label: 'Price crosses above', help: 'Fires once when the price rises through the level.' },
-  { value: 'price_below', label: 'Price crosses below', help: 'Fires once when the price falls through the level.' },
+  { value: 'price_above', label: 'Price crosses above', help: 'Fires each time the price rises through the level, until you turn it off.' },
+  { value: 'price_below', label: 'Price crosses below', help: 'Fires each time the price falls through the level, until you turn it off.' },
   { value: 'price_move', label: 'Sudden move', help: 'Fires when the price moves this much, either way, within the window.' },
   { value: 'recommendation', label: 'MT5 recommendations', help: 'Entries, stop moves, exits and resizes from the recommendation feeds.' },
   { value: 'near_miss', label: 'Near misses', help: 'A strategy says an entry looks close, once per setup.' },
@@ -53,6 +53,8 @@ function NewRule() {
   const [hour, setHour] = useState('7')
   const [botId, setBotId] = useState('')
   const [note, setNote] = useState('')
+  const [once, setOnce] = useState(false)
+  const isCross = kind === 'price_above' || kind === 'price_below'
   const create = useMutation({
     mutationFn: () => {
       const params =
@@ -72,8 +74,9 @@ function NewRule() {
             account_id: null,
             note,
             enabled: true,
-            once: kind === 'price_above' || kind === 'price_below',
-            cooldown_minutes: kind === 'price_move' ? Number(minutes) : 0,
+            once: isCross && once,
+            // a price hovering around the level would otherwise fire on every wiggle
+            cooldown_minutes: kind === 'price_move' ? Number(minutes) : isCross ? 15 : 0,
           },
         }),
       )
@@ -135,6 +138,12 @@ function NewRule() {
           </Field>
         </div>
       </div>
+      {isCross && (
+        <label className="mt-3 flex items-center gap-2 text-[13px] text-ink-2">
+          <input type="checkbox" checked={once} onChange={(e) => setOnce(e.target.checked)} />
+          Only once: switch this alert off after it fires
+        </label>
+      )}
       <div className="mt-3 flex items-center gap-3">
         <Button
           variant="primary"
@@ -201,7 +210,10 @@ function Rules() {
         <tbody>
           {data.map((r) => (
             <tr key={r.id} className={r.enabled ? '' : 'text-muted'}>
-              <td className="font-medium">{describe(r)}</td>
+              <td className="font-medium">
+                {describe(r)}
+                {r.once && <span className="ml-2 text-[12px] font-normal text-muted">only once</span>}
+              </td>
               <td className="text-ink-2">{r.note}</td>
               <td className="text-ink-2">{ago(r.last_fired_at)}</td>
               <td>
