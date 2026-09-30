@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useCandles, useFills, useOrders, usePositions } from '../api/hooks'
 import { PriceChart, type ChartLine, type ChartMarker } from '../components/charts'
 import { FillsTable, OrderTicket, OrdersTable, PositionsTable } from '../components/trading'
-import { Empty, Panel, Tabs } from '../components/ui'
+import { Empty, Panel, Tabs, inputClass } from '../components/ui'
 import { useSelectedAccount } from '../lib/account'
 import { qty } from '../lib/format'
 
@@ -13,32 +13,44 @@ export default function Trade() {
   const { account } = useSelectedAccount()
   const [timeframe, setTimeframe] = useState<(typeof TIMEFRAMES)[number]>('4h')
   const [tab, setTab] = useState<Tab>('positions')
+  // which book's activity the chart draws: everything on the account by default
+  const [shown, setShown] = useState('')
   const { data: candles } = useCandles('BTC/USDT', timeframe)
   const { data: fills } = useFills({ account_id: account?.id, limit: 500 })
   const { data: positions } = usePositions({ account_id: account?.id })
   const { data: openOrders } = useOrders({ account_id: account?.id, status: 'active' })
 
-  // the manual book's own activity on the chart; bots have their own page
+  const books = useMemo(() => (account?.books ?? []).map((b) => b.label), [account])
+  const visible = (label: string) => !shown || label === shown
+  // with several books on the chart, every mark says whose it is
+  const tag = (label: string, what: string) => (shown ? what : `${label} ${what}`)
+
   const markers = useMemo<ChartMarker[]>(
     () =>
       (fills ?? [])
-        .filter((f) => f.book_label === 'Manual')
-        .map((f) => ({ time: Date.parse(f.time) / 1000, side: f.side as 'buy' | 'sell', text: qty(f.quantity) })),
-    [fills],
+        .filter((f) => visible(f.book_label))
+        .map((f) => ({
+          time: Date.parse(f.time) / 1000,
+          side: f.side as 'buy' | 'sell',
+          text: shown ? qty(f.quantity) : f.book_label,
+        })),
+    [fills, shown],
   )
   const lines = useMemo<ChartLine[]>(() => {
     const out: ChartLine[] = []
     for (const p of positions ?? []) {
-      if (p.book !== 'manual') continue
-      out.push({ price: p.average_price, label: 'Entry', kind: 'entry' })
-      if (p.stop_price) out.push({ price: p.stop_price, label: 'Stop', kind: 'stop' })
-      if (p.take_profit) out.push({ price: p.take_profit, label: 'Target', kind: 'target' })
+      if (!visible(p.book_label)) continue
+      out.push({ price: p.average_price, label: tag(p.book_label, 'entry'), kind: 'entry' })
+      if (p.stop_price) out.push({ price: p.stop_price, label: tag(p.book_label, 'stop'), kind: 'stop' })
+      if (p.take_profit) out.push({ price: p.take_profit, label: tag(p.book_label, 'target'), kind: 'target' })
     }
     for (const o of openOrders ?? []) {
-      if (o.book === 'manual' && o.limit_price) out.push({ price: o.limit_price, label: `${o.side} limit`, kind: 'order' })
+      if (o.limit_price && visible(o.book_label)) {
+        out.push({ price: o.limit_price, label: tag(o.book_label, `${o.side} limit`), kind: 'order' })
+      }
     }
     return out
-  }, [positions, openOrders])
+  }, [positions, openOrders, shown])
 
   if (!account) return <Empty>Choose or create an account to trade.</Empty>
 
@@ -50,7 +62,22 @@ export default function Trade() {
           title="BTC / USDT"
           flush
           actions={
-            <Tabs value={timeframe} onChange={setTimeframe} options={TIMEFRAMES.map((t) => ({ value: t, label: t }))} />
+            <>
+              <select
+                aria-label="Show on chart"
+                className={`${inputClass} h-8 w-auto`}
+                value={shown}
+                onChange={(e) => setShown(e.target.value)}
+              >
+                <option value="">All books</option>
+                {books.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+              <Tabs value={timeframe} onChange={setTimeframe} options={TIMEFRAMES.map((t) => ({ value: t, label: t }))} />
+            </>
           }
         >
           {candles && candles.length ? (

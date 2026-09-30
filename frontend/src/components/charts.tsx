@@ -95,6 +95,8 @@ export function PriceChart({
   const series = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const priceLines = useRef<IPriceLine[]>([])
   const markerApi = useRef<ReturnType<typeof createSeriesMarkers<Time>> | null>(null)
+  // the price scale widens to include these, so a stop is never off-screen
+  const linePrices = useRef<number[]>([])
   const theme = useThemeVersion()
 
   useEffect(() => {
@@ -107,6 +109,17 @@ export function PriceChart({
       wickUpColor: token('--up'),
       wickDownColor: token('--down'),
       priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+      autoscaleInfoProvider: (original: () => { priceRange: { minValue: number; maxValue: number } | null } | null) => {
+        const res = original()
+        if (!res?.priceRange || !linePrices.current.length) return res
+        return {
+          ...res,
+          priceRange: {
+            minValue: Math.min(res.priceRange.minValue, ...linePrices.current),
+            maxValue: Math.max(res.priceRange.maxValue, ...linePrices.current),
+          },
+        }
+      },
     })
     chart.current = c
     series.current = s
@@ -144,6 +157,7 @@ export function PriceChart({
     const s = series.current
     if (!s) return
     for (const line of priceLines.current) s.removePriceLine(line)
+    linePrices.current = lines.map((l) => l.price)
     const colors = { stop: '--down', target: '--up', entry: '--ink-2', order: '--paper' }
     priceLines.current = lines.map((l) =>
       s.createPriceLine({
@@ -155,6 +169,7 @@ export function PriceChart({
         axisLabelVisible: true,
       }),
     )
+    chart.current?.priceScale('right').applyOptions({ autoScale: true })
   }, [lines, theme])
 
   return <div ref={el} style={{ height }} className="w-full" />
