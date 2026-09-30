@@ -42,6 +42,12 @@ export function draftFromJob(params: {
 
 type Option = { path: string; label: string; fallback: unknown }
 
+/** Units that are easy to get wrong, shown next to the parameter name. */
+const HINTS: Record<string, string> = {
+  'pyramid.max_adds': 'extra units, 0 = no adds',
+  'pyramid.add_step_pct': 'fraction of price, 0.03 = 3%; needs max adds above 0',
+}
+
 /** Every parameter a report can vary for this strategy, with its default. */
 function optionsFor(strategy: Strategy | undefined): Option[] {
   if (!strategy) return []
@@ -52,7 +58,9 @@ function optionsFor(strategy: Strategy | undefined): Option[] {
   for (const [section, params] of Object.entries(strategy.defaults as Record<string, Record<string, unknown>>)) {
     for (const [key, value] of Object.entries(params)) {
       if (Array.isArray(value) || (value !== null && typeof value === 'object')) continue
-      out.push({ path: `${section}.${key}`, label: `${section}: ${key.replace(/_/g, ' ')}`, fallback: value })
+      const path = `${section}.${key}`
+      const hint = HINTS[path] ? ` (${HINTS[path]})` : ''
+      out.push({ path, label: `${section}: ${key.replace(/_/g, ' ')}${hint}`, fallback: value })
     }
   }
   return out

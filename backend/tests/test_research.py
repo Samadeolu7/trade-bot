@@ -168,3 +168,32 @@ def test_api_answers_a_repeat_with_409(owner):
     ), content_type="application/json")
     assert response.status_code == 409
     assert f"job #{job.pk}" in response.json()["detail"]
+
+
+def test_pyramid_step_must_be_a_fraction():
+    with pytest.raises(JobError, match="0.03 means 3%"):
+        validate_params("research_report", {"strategy": "donchian",
+                                            "params": {"pyramid.max_adds": [5], "pyramid.add_step_pct": [20]}})
+    with pytest.raises(JobError, match="0.03 means 3%"):
+        validate_params("research_report", {"strategy": "donchian",
+                                            "params": {"pyramid.max_adds": [5], "pyramid.add_step_pct": [-0.1]}})
+    ok = validate_params("research_report", {"strategy": "donchian",
+                                             "params": {"pyramid.max_adds": [5], "pyramid.add_step_pct": [0, 0.03]}})
+    assert ok["params"]["pyramid.add_step_pct"] == [0, 0.03]
+
+
+def test_pyramid_options_without_adds_are_refused():
+    # max_adds left at its config default of 0: add_step_pct can't change anything
+    with pytest.raises(JobError, match="only matters when pyramid.max_adds is above 0"):
+        validate_params("research_report", {"strategy": "donchian", "params": {"pyramid.add_step_pct": [0.03]}})
+    with pytest.raises(JobError, match="only matters when pyramid.max_adds is above 0"):
+        validate_params("research_report", {"strategy": "donchian",
+                                            "params": {"pyramid.max_adds": [0], "pyramid.add_step_pct": [0.03]}})
+    # comparing no adds against some adds is a real comparison
+    validate_params("research_report", {"strategy": "donchian",
+                                        "params": {"pyramid.max_adds": [0, 5], "pyramid.add_step_pct": [0.03]}})
+
+
+def test_pyramid_max_adds_must_be_a_whole_number():
+    with pytest.raises(JobError, match="whole number"):
+        validate_params("research_report", {"strategy": "donchian", "params": {"pyramid.max_adds": [2.5]}})

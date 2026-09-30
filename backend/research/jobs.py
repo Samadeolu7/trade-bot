@@ -158,10 +158,34 @@ def validate_params(kind: str, params: dict) -> dict:
         combos *= len(values)
     if combos > MAX_VARIANTS:
         raise JobError(f"{combos} variants requested; the limit is {MAX_VARIANTS} per job")
+    _check_pyramid(grid)
     return {
         "strategy": strategy, "symbol": params.get("symbol", "BTC/USDT"),
         "timeframe": params.get("timeframe", "4h"), "baseline": baseline, "params": grid,
     }
+
+
+def _check_pyramid(grid: dict) -> None:
+    """Catches pyramid settings that can't do what was meant: a step given
+    as a percentage instead of a fraction, or pyramid options with adds
+    switched off, which would only reproduce the plain strategy."""
+    for value in grid.get("pyramid.add_step_pct", []):
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not 0 <= value < 1:
+            raise JobError(
+                f"pyramid.add_step_pct is a fraction of price: 0.03 means 3%. Got {value!r}; use a value from 0 up to 1."
+            )
+    for value in grid.get("pyramid.max_adds", []):
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise JobError(f"pyramid.max_adds is a whole number of extra units (0 = no adds). Got {value!r}.")
+    other = sorted(path for path in grid if path.startswith("pyramid.") and path != "pyramid.max_adds")
+    if other:
+        default = int((trade_bot_config().get("strategy", {}).get("pyramid") or {}).get("max_adds", 0) or 0)
+        max_adds = grid.get("pyramid.max_adds", [default])
+        if not any(max_adds):
+            raise JobError(
+                f"{', '.join(other)} only matters when pyramid.max_adds is above 0, and every variant here has "
+                "no adds, so the results would match the plain strategy. Add pyramid.max_adds (e.g. 3 or 5)."
+            )
 
 
 def _downsample(curve: pd.Series) -> list[list[float]]:
