@@ -18,6 +18,9 @@ from trading.services import books
 from trading.services.orders import OrderError, close_position
 
 TIMEFRAMES = ["1h", "4h", "1d"]
+# backtest options the live engine doesn't implement yet; a bot using them
+# would trade differently from its research, so they're refused
+RESEARCH_ONLY_SECTIONS = {"pyramid"}
 ZERO = Decimal(0)
 
 
@@ -30,7 +33,11 @@ def strategy_defaults(name: str) -> dict[str, dict]:
     """config.yaml's defaults for every section a strategy reads — what
     the app shows as the bot's editable parameters."""
     strategy_config = trade_bot_config().get("strategy", {})
-    return {s: copy.deepcopy(strategy_config.get(s, {})) for s in STRATEGY_CATALOG[name].config_sections}
+    return {
+        s: copy.deepcopy(strategy_config.get(s, {}))
+        for s in STRATEGY_CATALOG[name].config_sections
+        if s not in RESEARCH_ONLY_SECTIONS
+    }
 
 
 def strategy_config_with(params: dict | None) -> dict:
@@ -58,6 +65,8 @@ def _validate_params(strategy: str, params: dict) -> dict:
         if "." not in path:
             raise OrderError(f"parameter {path!r} must look like section.key")
         section = path.split(".", 1)[0]
+        if section in RESEARCH_ONLY_SECTIONS:
+            raise OrderError(f"{section} is research-only for now: the engine doesn't do it yet")
         if section not in allowed:
             raise OrderError(f"{strategy} doesn't read the {section!r} section")
         clean[path] = value

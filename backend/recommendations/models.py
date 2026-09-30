@@ -21,6 +21,8 @@ class Feed(models.Model):
     status_reason = models.CharField(max_length=300, blank=True)
     last_diagnosis = models.JSONField(default=dict, blank=True)
     near_miss_key = models.CharField(max_length=80, blank=True)
+    # the open call + direction a repeat entry signal was last reported for
+    repeat_signal_key = models.CharField(max_length=80, blank=True)
 
     # the recommended position (signal strategies)
     direction = models.CharField(max_length=5, blank=True)  # "", "long", "short"
@@ -54,6 +56,7 @@ class Recommendation(models.Model):
         EXIT = "exit", "Exit"
         REBALANCE = "rebalance", "Resize"
         NEAR_MISS = "near_miss", "Near miss"
+        SIGNAL_AGAIN = "signal_again", "Signal again"
 
     feed = models.ForeignKey(Feed, on_delete=models.CASCADE, related_name="recommendations")
     kind = models.CharField(max_length=12, choices=Kind.choices)

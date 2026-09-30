@@ -36,6 +36,9 @@ class Outcome:
     reason: str
     diagnosis: dict = field(default_factory=dict)
     order: Order | None = None
+    # the strategy's entry conditions were met again while already in a
+    # position: {"direction", "reason", "entry", "stop"}
+    repeat_signal: dict | None = None
 
 
 def jsonable(data: dict) -> dict:
@@ -86,7 +89,19 @@ def evaluate_signal_bot(bot: Bot, strategy, df: pd.DataFrame, quote: Quote) -> O
                 position.save(update_fields=["stop_price", "updated_at"])
             else:
                 detail += f"; stop {position.stop_price:.2f}"
-        return Outcome(BotDecision.Action.HOLD, detail, diagnosis)
+        # one position at a time, as in every backtest: a fresh entry signal
+        # is recorded (and alerted once) but never adds to or flips the trade
+        repeat = None
+        signal = strategy.generate_signal(df)
+        if signal is not None and signal.direction in ("long", "short"):
+            repeat = {"direction": signal.direction, "reason": signal.reason,
+                      "entry": round(float(signal.entry_price), 2), "stop": round(float(signal.stop_loss), 2)}
+            if signal.direction == direction:
+                detail += f"; entry signal again ({signal.reason}), already {direction} so not adding"
+            else:
+                detail += f"; {signal.direction} signal ({signal.reason}), staying {direction} until its stop"
+            diagnosis = {**diagnosis, "repeat_signal": repeat}
+        return Outcome(BotDecision.Action.HOLD, detail, diagnosis, repeat_signal=repeat)
 
     signal = strategy.generate_signal(df)
     if signal is None or signal.direction == "flat":

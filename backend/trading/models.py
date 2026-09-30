@@ -125,6 +125,9 @@ class Bot(models.Model):
     consecutive_errors = models.PositiveIntegerField(default=0)
     # the near-miss currently being reported, so a lasting one alerts once
     near_miss_key = models.CharField(max_length=80, blank=True)
+    # the position + direction a repeat entry signal was last alerted for,
+    # so a signal that keeps firing alerts once per position
+    repeat_signal_key = models.CharField(max_length=80, blank=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+")
     created_at = models.DateTimeField(auto_now_add=True)
 

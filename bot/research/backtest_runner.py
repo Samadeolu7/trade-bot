@@ -55,6 +55,7 @@ def run_backtest_summary(
             slippage=backtest_config.get("slippage", 0.0005),
             initial_capital=backtest_config.get("initial_capital", 10_000.0),
             risk_pct=backtest_config.get("risk_pct", 0.01),
+            pyramid=strategy_config.get("pyramid"),
         )
     summary = summarize(
         result.trades,
@@ -63,6 +64,8 @@ def run_backtest_summary(
         timeframe,
         close=df["close"],
     )
+    if int((strategy_config.get("pyramid") or {}).get("max_adds", 0) or 0):
+        summary["adds"] = sum(t.adds for t in result.trades)
     by_strategy = breakdown_by_strategy(result.trades)
     if len(by_strategy) > 1:
         summary["by_strategy"] = by_strategy

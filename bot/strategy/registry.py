@@ -35,7 +35,8 @@ class StrategyInfo:
     can_short: bool
     description: str
     # config.yaml `strategy.<section>` entries this strategy reads; the
-    # app shows these as the bot's editable parameters
+    # app shows these as the bot's editable parameters. "pyramid" is the
+    # backtest engine's research-only pyramiding option (bot/backtest/engine.py)
     config_sections: tuple[str, ...]
 
 
@@ -45,7 +46,7 @@ STRATEGY_CATALOG: dict[str, StrategyInfo] = {
         StrategyInfo(
             "donchian", "signal", True,
             "Breakout of the prior N-bar high/low channel, exit on a wider channel or ATR trail.",
-            ("donchian",),
+            ("donchian", "pyramid"),
         ),
         StrategyInfo(
             "donchian_ensemble", "exposure", False,
@@ -55,42 +56,42 @@ STRATEGY_CATALOG: dict[str, StrategyInfo] = {
         StrategyInfo(
             "regime_switched", "signal", True,
             "Runs a trend strategy while the regime filter says trending, a ranging one otherwise.",
-            ("regime_switched", "regime", "regime_sma", "regime_natr", "donchian", "ema_cross", "rsi_bb"),
+            ("regime_switched", "regime", "regime_sma", "regime_natr", "donchian", "ema_cross", "rsi_bb", "pyramid"),
         ),
         StrategyInfo(
             "funding_filtered", "signal", True,
             "A trend strategy whose entries are vetoed when perpetual funding is crowded.",
-            ("funding_filtered", "donchian"),
+            ("funding_filtered", "donchian", "pyramid"),
         ),
         StrategyInfo(
             "ema_cross", "signal", True,
             "Fast/slow EMA cross with an ATR trailing stop.",
-            ("ema_cross",),
+            ("ema_cross", "pyramid"),
         ),
         StrategyInfo(
             "rsi_bb", "signal", True,
             "RSI/Bollinger mean reversion back to the midline.",
-            ("rsi_bb",),
+            ("rsi_bb", "pyramid"),
         ),
         StrategyInfo(
             "market_structure", "signal", True,
             "Swing break, retest, then entry on confirmed rejection.",
-            ("market_structure",),
+            ("market_structure", "pyramid"),
         ),
         StrategyInfo(
             "multi_timeframe", "signal", True,
             "Higher-timeframe trend with a daily pullback and reclaim.",
-            ("multi_timeframe",),
+            ("multi_timeframe", "pyramid"),
         ),
         StrategyInfo(
             "vol_expansion", "signal", True,
             "Bollinger squeeze followed by a volatility-expansion breakout.",
-            ("vol_expansion",),
+            ("vol_expansion", "pyramid"),
         ),
         StrategyInfo(
             "crt", "signal", True,
             "Candle Range Theory: sweep of the prior candle's range, close back inside.",
-            ("crt",),
+            ("crt", "pyramid"),
         ),
     ]
 }

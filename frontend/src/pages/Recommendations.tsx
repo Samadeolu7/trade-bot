@@ -115,6 +115,8 @@ function describe(e: Event): string {
       return `Move stop to ${money(e.stop)}`
     case 'exit':
       return `Exit ${e.direction} at ${money(e.price)} (${pct((e.pnl_pct ?? 0) / 100)})`
+    case 'signal_again':
+      return `${titleCase(e.direction)} signal again at ${money(e.price)} (call unchanged)`
     case 'rebalance':
       return `Resize from ${pct(e.from_weight, 0, false)} to ${pct(e.to_weight, 0, false)} at ${money(e.price)}`
     default:

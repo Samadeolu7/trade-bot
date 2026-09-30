@@ -750,7 +750,8 @@ def main() -> None:
         # producing N identical "variants" — refuse instead. Wrapper
         # strategies legitimately configure other sections, so skip them.
         if args.strategy not in ("regime_switched", "funding_filtered"):
-            foreign = sorted({section for section, _, _ in grid if section != args.strategy})
+            # "pyramid" is the backtest engine's own option, valid for any strategy
+            foreign = sorted({section for section, _, _ in grid if section not in (args.strategy, "pyramid")})
             if foreign:
                 parser.error(
                     f"--param section(s) {', '.join(foreign)} don't apply to --strategy {args.strategy}"

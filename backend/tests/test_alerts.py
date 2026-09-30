@@ -84,7 +84,7 @@ def test_undelivered_alerts_are_still_logged(owner, settings):
 def test_default_rules_are_added_once(owner):
     add_default_rules(owner)
     add_default_rules(owner)
-    assert AlertRule.objects.filter(user=owner).count() == 8
+    assert AlertRule.objects.filter(user=owner).count() == 9
 
 
 def test_engine_bot_trade_raises_alert(account, owner, quotes):
@@ -110,7 +110,7 @@ def test_alerts_api_defaults_and_toggle(owner):
     client.post("/api/auth/login", json.dumps({"username": "owner", "password": "correct-horse-battery"}),
                 content_type="application/json")
     rules = client.post("/api/alerts/defaults").json()
-    assert len(rules) == 8
+    assert len(rules) == 9
     rule = rules[0]
     response = client.put(f"/api/alerts/rules/{rule['id']}", json.dumps({**rule, "enabled": False}),
                           content_type="application/json")

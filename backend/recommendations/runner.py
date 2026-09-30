@@ -88,7 +88,20 @@ def _evaluate_signal(feed: Feed, strategy, df: pd.DataFrame, bar_time) -> list[R
             feed.direction, feed.entry_price, feed.entry_time = "", None, None
             feed.stop, feed.take_profit, feed.entry_context = None, None, {}
 
-    if not feed.direction:
+    if feed.direction:
+        # still in the call: a fresh entry signal is reported once per call
+        # and direction, but the call itself doesn't change
+        signal = strategy.generate_signal(df)
+        if signal is not None and signal.direction in ("long", "short"):
+            key = f"{feed.entry_time.isoformat() if feed.entry_time else ''}:{signal.direction}"[:80]
+            if key != feed.repeat_signal_key:
+                feed.repeat_signal_key = key
+                events.append(Recommendation(
+                    feed=feed, kind=Recommendation.Kind.SIGNAL_AGAIN, bar_time=bar_time,
+                    direction=signal.direction, price=float(signal.entry_price), stop=float(signal.stop_loss),
+                    reason=signal.reason, context=jsonable(signal.context), fear_greed=fear_greed(),
+                ))
+    else:
         signal = strategy.generate_signal(df)
         if signal is not None and signal.direction != "flat":
             opened = open_position(signal, size=1.0, fee=feed.fee, slippage=feed.slippage, owner=strategy)
@@ -161,6 +174,16 @@ def _alert(event: Recommendation) -> None:
     elif event.kind == Recommendation.Kind.REBALANCE:
         title = f"MT5: resize {pair} to {event.to_weight:.0%} of capital ({feed.name})"
         body = f"From {event.from_weight:.0%}, at {_fmt(event.price)}."
+    elif event.kind == Recommendation.Kind.SIGNAL_AGAIN:
+        held = feed.direction
+        if event.direction == held:
+            title = f"MT5: {held} {pair} signal again ({feed.name}), call unchanged"
+            body = f"{event.reason} at {_fmt(event.price)}. Already {held} from {_fmt(feed.entry_price)}, stop {_fmt(feed.stop)}."
+        else:
+            title = f"MT5: {event.direction} {pair} signal while the call is {held} ({feed.name})"
+            body = f"{event.reason} at {_fmt(event.price)}. The {held} call stands until its stop at {_fmt(feed.stop)}."
+        notify(AlertRule.Kind.REPEAT_SIGNAL, title, body)
+        return
     else:
         notify(AlertRule.Kind.NEAR_MISS, f"Near miss: {feed.name} ({feed.timeframe})", event.reason)
         return

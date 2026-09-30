@@ -15,6 +15,7 @@ type Summary = {
   profit_factor?: number
   win_rate_pct?: number
   buy_hold_pct?: number
+  adds?: number
 }
 type Run = {
   label: string
@@ -26,6 +27,7 @@ type Run = {
 const n = (v: number | undefined, suffix = '') => (v == null ? '—' : `${v > 0 && suffix === '%' ? '+' : ''}${v}${suffix}`)
 
 function RunTable({ runs }: { runs: Run[] }) {
+  const pyramiding = runs.some((r) => Object.values(r.windows).some((w) => w?.adds != null))
   return (
     <div className="overflow-x-auto">
       <table className="data">
@@ -38,6 +40,7 @@ function RunTable({ runs }: { runs: Run[] }) {
             <th className="r">Sharpe</th>
             <th className="r">Profit factor</th>
             <th className="r">Trades</th>
+            {pyramiding && <th className="r">Adds</th>}
             <th className="r">Buy and hold</th>
           </tr>
         </thead>
@@ -54,6 +57,7 @@ function RunTable({ runs }: { runs: Run[] }) {
                   <td className="num r">{n(s?.sharpe_ratio)}</td>
                   <td className="num r">{n(s?.profit_factor)}</td>
                   <td className="num r">{n(s?.trades)}</td>
+                  {pyramiding && <td className="num r">{n(s?.adds)}</td>}
                   <td className="num r">{n(s?.buy_hold_pct, '%')}</td>
                 </tr>
               )
@@ -121,7 +125,7 @@ function NewJob() {
         >
           <textarea
             className={`${inputClass} h-24 py-2`}
-            placeholder={'donchian.long_only = false, true\ndonchian.exit_channel_period = 40, 55'}
+            placeholder={'donchian.long_only = false, true\npyramid.max_adds = 0, 1, 2, 3'}
             value={grid}
             onChange={(e) => setGrid(e.target.value)}
           />

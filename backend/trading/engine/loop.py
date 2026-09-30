@@ -285,6 +285,7 @@ class Engine:
             bot.save(update_fields=["last_bar_at", "last_run_at", "consecutive_errors", "status_reason"])
         publish(f"account.{bot.account_id}", "decision", {"bot": bot.pk, "action": outcome.action})
         self._near_miss(bot, outcome)
+        self._repeat_signal(bot, outcome)
 
         if outcome.order is not None:
             order = outcome.order
@@ -312,6 +313,28 @@ class Engine:
         if key:
             notify(AlertRule.Kind.NEAR_MISS, f"Near miss: {bot.name} ({bot.timeframe})",
                    diagnosis.get("near_miss_reason") or key, account=bot.account, bot=bot)
+
+    def _repeat_signal(self, bot: Bot, outcome: Outcome) -> None:
+        """Entry conditions met again while in a trade: alert once per
+        position and direction, not on every candle it stays true."""
+        repeat = outcome.repeat_signal
+        if repeat is None:
+            return
+        position = Position.objects.filter(book=bot.book, symbol=bot.symbol).first()
+        opened = position.opened_at.isoformat() if position and position.opened_at else ""
+        key = f"{opened}:{repeat['direction']}"[:80]
+        if key == bot.repeat_signal_key:
+            return
+        bot.repeat_signal_key = key
+        bot.save(update_fields=["repeat_signal_key"])
+        held = position.direction if position else ""
+        if repeat["direction"] == held:
+            title = f"{bot.name}: {held} entry signal again, already {held}"
+            body = f"{repeat['reason']} at {repeat['entry']:,.2f}. Not adding: bots hold one position at a time."
+        else:
+            title = f"{bot.name}: {repeat['direction']} signal while {held}"
+            body = f"{repeat['reason']} at {repeat['entry']:,.2f}. Staying {held} until its stop."
+        notify(AlertRule.Kind.REPEAT_SIGNAL, title, body, account=bot.account, bot=bot)
 
     # --- periodic -----------------------------------------------------------------
 

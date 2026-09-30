@@ -14,6 +14,7 @@ const KINDS: { value: string; label: string; help: string }[] = [
   { value: 'price_move', label: 'Sudden move', help: 'Fires when the price moves this much, either way, within the window.' },
   { value: 'recommendation', label: 'MT5 recommendations', help: 'Entries, stop moves, exits and resizes from the recommendation feeds.' },
   { value: 'near_miss', label: 'Near misses', help: 'A strategy says an entry looks close, once per setup.' },
+  { value: 'repeat_signal', label: 'Entry signal while in a trade', help: 'A bot or feed already in a position sees its entry conditions again. Once per position; nothing is added.' },
   { value: 'bot_trade', label: 'Bot trades', help: 'Every order a bot places, with its reason.' },
   { value: 'stop_hit', label: 'Stop or take profit hit', help: 'Whenever the engine closes a position at its stop or target.' },
   { value: 'bot_error', label: 'Bot or engine problem', help: 'A bot stopped by errors, or the engine going down and coming back.' },
@@ -116,7 +117,7 @@ function NewRule() {
               <input className={inputClass} inputMode="numeric" value={hour} onChange={(e) => setHour(e.target.value)} />
             </Field>
           )}
-          {(kind === 'bot_trade' || kind === 'stop_hit' || kind === 'bot_error' || kind === 'near_miss') && (
+          {(kind === 'bot_trade' || kind === 'stop_hit' || kind === 'bot_error' || kind === 'near_miss' || kind === 'repeat_signal') && (
             <Field label="Bot">
               <select className={inputClass} value={botId} onChange={(e) => setBotId(e.target.value)}>
                 <option value="">Any bot</option>

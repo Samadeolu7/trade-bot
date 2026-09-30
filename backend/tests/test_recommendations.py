@@ -104,3 +104,16 @@ def test_seed_brings_over_feeds_with_open_calls_and_history(tmp_path, owner, quo
 
     call_command("seed_shadow_bots", str(path), owner="owner")
     assert Recommendation.objects.count() == 1
+
+
+def test_feed_reports_a_repeat_signal_once_per_call(owner):
+    f = feed()
+    make_candles([100.0] * 70 + [110.0])
+    run_feed(f, "binance", FUNDING)
+    make_candles([100.0] * 70 + [110.0, 112.0])
+    events = run_feed(f, "binance", FUNDING)
+    assert [e.kind for e in events] == ["signal_again"]
+    make_candles([100.0] * 70 + [110.0, 112.0, 114.0])
+    assert [e.kind for e in run_feed(f, "binance", FUNDING)] == []
+    f.refresh_from_db()
+    assert f.direction == "long"  # the call itself never changes

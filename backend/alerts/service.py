@@ -222,6 +222,7 @@ def daily_summaries(now: datetime | None = None) -> int:
 DEFAULT_RULES = [
     {"kind": AlertRule.Kind.RECOMMENDATION},
     {"kind": AlertRule.Kind.NEAR_MISS},
+    {"kind": AlertRule.Kind.REPEAT_SIGNAL},
     {"kind": AlertRule.Kind.BOT_TRADE},
     {"kind": AlertRule.Kind.STOP_HIT},
     {"kind": AlertRule.Kind.BOT_ERROR},

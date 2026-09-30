@@ -79,6 +79,9 @@ strategy:
     min_rr: 1.0               # skip setups with less reward:risk than this to the target
     stop_buffer_pct: 0.0      # extra room past the sweep wick, as a fraction of price
     trend_ema_period: 0       # 0 = off; else longs only above / shorts only below this EMA ("HTF alignment")
+  pyramid:                    # research option for signal strategies, off by default (spec Section 8)
+    max_adds: 0               # extra units a trade may add on fresh same-direction entry signals; 0 = one position, as every test so far
+    add_step_pct: 0.0         # only add once price has moved this fraction in the trade's favour since the last fill
   funding_filtered:
     base_strategy: donchian   # any TREND_STRATEGY_CHOICES entry — the strategy being filtered
     high_threshold: 0.0005    # veto new longs when funding rate exceeds this (crowded-long risk) — untested guess, sweep it

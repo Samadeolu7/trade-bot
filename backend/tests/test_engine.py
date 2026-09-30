@@ -121,3 +121,26 @@ def test_failing_bot_is_paused_after_repeated_errors(account, owner, quotes, mon
         engine().run_bot(bot)
     bot.refresh_from_db()
     assert bot.status == Bot.Status.ERROR
+
+
+def test_repeat_entry_signal_is_logged_every_bar_but_alerted_once(account, owner, quotes):
+    from alerts.models import AlertEvent, AlertRule
+
+    AlertRule.objects.create(user=owner, kind="repeat_signal")
+    quotes.set("BTC/USDT", 110, 111)
+    bot = running_bot(account, owner, name="breakout", strategy="donchian", timeframe="1d", allocation=5_000,
+                      params={"donchian.channel_period": 5, "donchian.exit_channel_period": 5})
+    make_candles([100.0] * 70 + [110.0])
+    engine().run_bot(bot)
+    held = Position.objects.get(book=bot.book).quantity
+
+    for closes in ([110.0, 112.0], [110.0, 112.0, 114.0]):
+        make_candles([100.0] * 70 + closes)
+        bot.refresh_from_db()
+        decision = engine().run_bot(bot)
+        assert decision.action == BotDecision.Action.HOLD
+        assert "entry signal again" in decision.reason
+        assert decision.diagnosis["repeat_signal"]["direction"] == "long"
+
+    assert Position.objects.get(book=bot.book).quantity == held  # never adds
+    assert AlertEvent.objects.filter(kind="repeat_signal").count() == 1

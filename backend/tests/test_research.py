@@ -34,3 +34,15 @@ def test_job_params_are_validated():
     with pytest.raises(JobError):
         validate_params("research_report", {"strategy": "donchian",
                                             "params": {"donchian.channel_period": list(range(30))}})
+
+
+def test_pyramiding_is_a_research_option_but_not_a_bot_option(account, owner):
+    from trading.services.bots import create_bot
+    from trading.services.orders import OrderError
+
+    params = validate_params("research_report", {"strategy": "donchian",
+                                                 "params": {"pyramid.max_adds": [0, 2]}})
+    assert params["params"] == {"pyramid.max_adds": [0, 2]}
+    with pytest.raises(OrderError, match="research-only"):
+        create_bot(account, name="p", strategy="donchian", allocation=100, user=owner,
+                   params={"pyramid.max_adds": 2})
