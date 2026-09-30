@@ -163,3 +163,38 @@ a universe re-selected monthly by trailing volume (top-20 coins with
 ≥$2M median 30-day volume, point-in-time), ensemble per coin, rotated.
 It needs a multi-asset backtester (new code), since the research API
 tests one symbol at a time.
+
+## Multi-coin rotational ensemble (the paper's portfolio), pre-registered 2026-09-30
+
+Written before the backtester exists, so the design can't drift toward
+the results.
+
+**Design (fixed):**
+- **Candidate pool:** every coin tested so far (BTC, ETH, SOL, BNB, XRP, ADA,
+  DOGE, LTC, LINK, DOT, AVAX, ATOM, TRX, BCH, ETC, FIL, NEAR, XLM, UNI, LUNC,
+  FTT, EOS, XTZ) plus SHIB, ALGO, VET, ICP. Some of these later collapsed or
+  faded; that's deliberate. Coins whose history Binance no longer serves are
+  skipped and listed. The pool is still "coins listed on Binance today", so
+  some survivorship remains.
+- **Point-in-time universe:** at the first 4h bar of each calendar month,
+  rank the coins that have at least 365 days of history (the ensemble's
+  longest lookback, and the paper's "listed ≥1 year") by median daily dollar
+  volume over the prior 30 days. Keep the top N. This uses only data
+  available at that moment.
+- **Sizing:** capital is split into N equal slots. Each held coin's target is
+  slot × its donchian_ensemble weight (4h, bars_per_day 6, vol_target 0.25,
+  the paper's lookbacks). A coin that drops out of the universe goes to 0.
+  Total exposure is ≤ 100%, no leverage.
+- **Rebalancing:** each 4h close, per coin. Skip changes smaller than 10% of a
+  slot, but always execute going flat. Fee 0.1% + slippage 0.05% on traded
+  notional.
+- **Windows:** the same train (2020–2023) and test (2024-01-01..holdout)
+  windows, with warmup history before each.
+
+**Primary: N = 10.** N = 5 and N = 20 are reported as sensitivity only, not
+as a choice.
+
+**Pass criteria:** the N = 10 portfolio's Sharpe beats the BTC ensemble alone
+(train 1.45, test 0.90, same summarize() metric) in **both** windows, with
+test max drawdown no worse than -20%. A pass makes it a candidate for a
+paper run. The holdout stays untouched until then.
