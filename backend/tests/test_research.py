@@ -80,3 +80,91 @@ def test_cli_reports_are_rebuilt_from_their_experiment_rows():
     assert [r["label"] for r in runs] == ["donchian long_only=0", "donchian long_only=1", "baseline: donchian_ensemble"]
     assert set(runs[0]["windows"]) == {"train", "test"}
     assert set(reports[0]["runs"][0]["windows"]) == {"holdout"}
+
+
+def _donchian_history():
+    make_candles([100.0 + (i % 40) for i in range(1300)], start=datetime(2023, 1, 1, tzinfo=timezone.utc))
+
+
+def _run(owner, grid):
+    job = ResearchJob.objects.create(
+        kind="research_report", created_by=owner,
+        params={"strategy": "donchian", "timeframe": "1d", "params": grid},
+    )
+    run_job(job, fetch=False)
+    job.refresh_from_db()
+    assert job.status == "done", job.error
+    return job
+
+
+def test_exact_repeat_of_a_finished_job_is_refused(owner):
+    from research.jobs import RepeatJobError, check_not_repeat
+
+    _donchian_history()
+    job = _run(owner, {"donchian.long_only": [False, True]})
+    # same settings, values in a different order: still a repeat
+    params = validate_params("research_report", {"strategy": "donchian", "timeframe": "1d",
+                                                 "params": {"donchian.long_only": [True, False]}})
+    with pytest.raises(RepeatJobError, match=f"job #{job.pk}"):
+        check_not_repeat(params)
+    # a different market or setting is new research
+    check_not_repeat({**params, "symbol": "ETH/USDT"})
+    check_not_repeat({**params, "params": {"donchian.long_only": [True], "donchian.channel_period": [30]}})
+
+
+def test_a_repeat_is_allowed_after_the_strategy_code_changes(owner, monkeypatch):
+    import research.jobs as jobs
+
+    _donchian_history()
+    _run(owner, {"donchian.long_only": [True]})
+    params = validate_params("research_report", {"strategy": "donchian", "timeframe": "1d",
+                                                 "params": {"donchian.long_only": [True]}})
+    monkeypatch.setattr(jobs, "code_version", lambda: "changed-code")
+    jobs.check_not_repeat(params)  # no error
+
+
+def test_partial_repeat_reuses_the_earlier_result_instead_of_recomputing(owner):
+    from research.jobs import check_not_repeat
+
+    _donchian_history()
+    first = _run(owner, {"donchian.long_only": [True]})
+    rows_before = Experiment.objects.filter(strategy="donchian").exclude(job=first).count()
+    params = {"donchian.long_only": [True], "donchian.channel_period": [20, 30]}  # 20 is the config default
+    check_not_repeat(validate_params("research_report", {"strategy": "donchian", "timeframe": "1d", "params": params}))
+    second = _run(owner, params)
+
+    labels = [r["label"] for r in second.result["runs"]]
+    reused = [r for r in second.result["runs"] if r["label"].endswith("(earlier result)")]
+    assert len(reused) == 1 and "channel_period=20" in reused[0]["label"], labels
+    assert f"job #{first.pk}" in reused[0]["earlier_result"]
+    assert reused[0]["equity"] == {}
+    first_variant = next(r for r in first.result["runs"] if not r["baseline"])
+    assert reused[0]["windows"]["test"] == first_variant["windows"]["test"]
+    # only the new variant and the baseline were computed and recorded
+    assert Experiment.objects.filter(job=second).count() == 4
+    assert rows_before == 0
+
+
+def test_identical_job_already_queued_is_refused(owner):
+    from research.jobs import RepeatJobError, check_not_repeat
+
+    params = validate_params("research_report", {"strategy": "donchian", "params": {"pyramid.max_adds": [5]}})
+    ResearchJob.objects.create(kind="research_report", created_by=owner, params=params)
+    with pytest.raises(RepeatJobError, match="already queued"):
+        check_not_repeat(params)
+
+
+def test_api_answers_a_repeat_with_409(owner):
+    import json
+
+    from django.test import Client
+
+    _donchian_history()
+    job = _run(owner, {"donchian.long_only": [True]})
+    client = Client()
+    client.force_login(owner)
+    response = client.post("/api/research/jobs", json.dumps(
+        {"strategy": "donchian", "timeframe": "1d", "params": {"donchian.long_only": [True]}}
+    ), content_type="application/json")
+    assert response.status_code == 409
+    assert f"job #{job.pk}" in response.json()["detail"]

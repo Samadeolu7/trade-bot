@@ -29,6 +29,12 @@ class Experiment(models.Model):
     decision_reason = models.TextField(blank=True)
     # the SQLite row this was imported from, so re-running the import is safe
     source_id = models.IntegerField(null=True, unique=True)
+    # identity of the run that produced this row: strategy, market, resolved
+    # settings, costs, windows and a hash of the strategy/backtest code (see
+    # research.jobs.run_key). Two rows with the same run_key and window are
+    # the same computation, which is what the repeat check looks for.
+    run_key = models.CharField(max_length=24, blank=True, db_index=True)
+    job = models.ForeignKey("ResearchJob", null=True, blank=True, on_delete=models.SET_NULL, related_name="experiments")
 
     class Meta:
         ordering = ["-created_at"]

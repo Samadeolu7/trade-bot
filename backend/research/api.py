@@ -6,7 +6,7 @@ from ninja.errors import HttpError
 
 from bot.research.lifecycle import STAGES
 from core.audit import audit
-from research.jobs import JobError, validate_params
+from research.jobs import JobError, RepeatJobError, check_not_repeat, validate_params
 from research.legacy_reports import legacy_reports
 from research.models import Experiment, ResearchJob, ShadowRebalance, ShadowTrade, StrategyLifecycle
 from trading.permissions import require_owner, require_verified
@@ -155,6 +155,9 @@ def create_job(request, payload: JobIn):
     require_verified(request)
     try:
         params = validate_params(ResearchJob.Kind.RESEARCH_REPORT, payload.dict())
+        check_not_repeat(params)
+    except RepeatJobError as exc:
+        raise HttpError(409, str(exc)) from exc
     except JobError as exc:
         raise HttpError(400, str(exc)) from exc
     job = ResearchJob.objects.create(kind=ResearchJob.Kind.RESEARCH_REPORT, params=params, created_by=request.user)
