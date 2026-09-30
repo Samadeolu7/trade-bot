@@ -1,127 +1,166 @@
 name: btc_trade_bot
 
 services:
-  # Control — untouched. Donchian trend / flat ranging / ADX regime filter,
-  # the strategy that's been shadow-running since Phase 4. Do not change
-  # this service when adding new concurrent candidates below.
-  trade-bot:
+  # The command-line tool (main.py) for research reports, backfills and
+  # holdout checks, run on demand: `docker compose run --rm cli python main.py
+  # research-report ...` (see the Research Report workflow). The profile keeps
+  # it from starting with `up`. The shadow and recommend services that used to
+  # be here were retired 2026-09-30: the web platform's paper bots and
+  # recommendation feeds (seeded from their final state) replaced them.
+  cli:
     image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
-    container_name: btc_trade_bot
-    restart: unless-stopped
+    profiles: ["cli"]
     env_file:
       - .env
     volumes:
       - trade_bot_data:/app/data
       - trade_bot_logs:/app/logs
-    command: ["python", "main.py", "shadow", "--strategy", "regime_switched", "--strategy-label", "donchian_adx_control"]
 
-  # Concurrent candidate #3: donchian trend gated by the NATR
-  # volatility-expansion regime filter instead of ADX.
-  trade-bot-natr-regime:
-    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
-    container_name: btc_trade_bot_natr_regime
-    restart: unless-stopped
-    env_file:
-      - .env
-    volumes:
-      - trade_bot_data:/app/data
-      - trade_bot_logs:/app/logs
-    command: ["python", "main.py", "shadow", "--strategy", "regime_switched", "--strategy-label", "donchian_natr_regime", "--regime-type", "natr"]
+  # ---------------------------------------------------------------------------
+  # Web platform (backend/, frontend/): accounts, paper trading, bots,
+  # recommendations, research and alerts in one app at leads.yincools.com.ng.
+  # Needs in .env:
+  # DJANGO_SECRET_KEY, POSTGRES_PASSWORD, TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID.
+  # ---------------------------------------------------------------------------
 
-  # Concurrent candidate #5: donchian trend, filtered by Binance perpetual
-  # funding-rate extremes (crowded-long/short veto) — see
-  # bot/strategy/funding_filter.py. Needs read-only egress to Binance's
-  # USD-M futures API in addition to spot, for funding-rate history only.
-  trade-bot-funding-filtered:
-    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
-    container_name: btc_trade_bot_funding_filtered
+  platform-db:
+    image: postgres:16-alpine
+    container_name: trade_desk_db
     restart: unless-stopped
-    env_file:
-      - .env
+    environment:
+      POSTGRES_DB: trade
+      POSTGRES_USER: trade
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     volumes:
-      - trade_bot_data:/app/data
-      - trade_bot_logs:/app/logs
-    command: ["python", "main.py", "shadow", "--strategy", "funding_filtered", "--strategy-label", "donchian_funding_filtered"]
+      - platform_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trade -d trade"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
-  # Concurrent candidate #6: plain donchian (config's 20/55 channels,
-  # unchanged) on 4h candles instead of 1d. Research reports found it
-  # profitable in both train and test windows on BTC (PF 1.68 / 1.48) and
-  # ETH (PF 1.60 / 1.55) with no 4h-specific tuning — see spec Section 7g.
-  # Standalone (no regime filter), exactly the configuration backtested.
-  trade-bot-donchian-4h:
-    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
-    container_name: btc_trade_bot_donchian_4h
+  platform-redis:
+    image: redis:7-alpine
+    container_name: trade_desk_redis
     restart: unless-stopped
-    env_file:
-      - .env
-    volumes:
-      - trade_bot_data:/app/data
-      - trade_bot_logs:/app/logs
-    command: ["python", "main.py", "shadow", "--strategy", "donchian", "--strategy-label", "donchian_4h", "--timeframe", "4h"]
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
-  # Concurrent candidate #7: the control's exact setup (donchian trend,
-  # flat ranging, ADX regime filter) on 4h instead of 1d, alongside
-  # donchian-4h — does the ADX gate avoid bad 4h trades live? Backtest:
-  # train PF 1.89 / 76 trades, test PF 1.39 / 37 (vs plain donchian's 1.48).
-  # Paper only — not in the recommend feed, since its signals are a subset
-  # of donchian_4h's and would duplicate them.
-  trade-bot-donchian-adx-4h:
-    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
-    container_name: btc_trade_bot_donchian_adx_4h
-    restart: unless-stopped
-    env_file:
-      - .env
-    volumes:
-      - trade_bot_data:/app/data
-      - trade_bot_logs:/app/logs
-    command: ["python", "main.py", "shadow", "--strategy", "regime_switched", "--strategy-label", "donchian_adx_4h", "--timeframe", "4h"]
+  # applies database migrations once per deploy; everything else waits for it
+  platform-migrate:
+    image: ${PLATFORM_IMAGE:-samadeolu7/trade-desk-platform:latest}
+    env_file: [.env]
+    environment: &platform_env
+      DATABASE_URL: postgres://trade:${POSTGRES_PASSWORD}@platform-db:5432/trade
+      REDIS_URL: redis://platform-redis:6379/0
+      DJANGO_ALLOWED_HOSTS: leads.yincools.com.ng,localhost,platform-web
+      DJANGO_CSRF_TRUSTED_ORIGINS: https://leads.yincools.com.ng
+    command: ["python", "manage.py", "migrate", "--noinput"]
+    healthcheck:
+      disable: true
+    depends_on:
+      platform-db: {condition: service_healthy}
+    restart: "no"
 
-  # Concurrent candidate #8: Donchian ensemble with vol-targeted sizing
-  # (spec Section 7h) on 4h. Holds a changing fraction of capital rather
-  # than discrete positions, so it runs the exposure paper loop
-  # (bot/shadow/exposure_runner.py) and sends EXPOSURE_REBALANCE alerts.
-  # Rebalances only on a >=10-point weight change, so it's practical to
-  # follow by hand in MT5 (the backtests used every-bar rebalancing).
-  trade-bot-donchian-ensemble-4h:
-    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
-    container_name: btc_trade_bot_donchian_ensemble_4h
+  platform-web:
+    image: ${PLATFORM_IMAGE:-samadeolu7/trade-desk-platform:latest}
+    container_name: trade_desk_web
     restart: unless-stopped
-    env_file:
-      - .env
+    env_file: [.env]
+    environment: *platform_env
+    depends_on:
+      platform-migrate: {condition: service_completed_successfully}
+      platform-redis: {condition: service_healthy}
+    # the retired CLI runs' SQLite database, read-only, for import_sqlite
+    # and seed_shadow_bots
     volumes:
-      - trade_bot_data:/app/data
-      - trade_bot_logs:/app/logs
-    command: ["python", "main.py", "shadow", "--strategy", "donchian_ensemble", "--strategy-label", "donchian_ensemble_4h", "--timeframe", "4h", "--param", "donchian_ensemble.bars_per_day=6", "--param", "donchian_ensemble.rebalance_threshold=0.1"]
+      - trade_bot_data:/legacy:ro
+    networks: [default, traefik_public]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik_public"
+      - "traefik.http.routers.desk-api.rule=Host(`leads.yincools.com.ng`) && (PathPrefix(`/api`) || PathPrefix(`/ws`) || PathPrefix(`/admin`) || PathPrefix(`/static`))"
+      - "traefik.http.routers.desk-api.entrypoints=websecure"
+      - "traefik.http.routers.desk-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.desk-api.priority=100"
+      - "traefik.http.services.desk-api.loadbalancer.server.port=8000"
 
-  # Advisory recommendation feed for manual trading (MT5/Exness BTCUSD) — a
-  # separate product from the shadow-run paper simulations above, never
-  # places an order anywhere. One process covers every strategy listed in
-  # config.yaml's recommend.strategies (shared candle data/Binance polling),
-  # so this doesn't need one service per strategy the way shadow runs do.
-  trade-bot-recommend:
-    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
-    container_name: btc_trade_bot_recommend
+  # the engine: bots, engine-held stops, resting paper orders, price alerts.
+  # Separate from web so a website crash or redeploy never stops it.
+  platform-engine:
+    image: ${PLATFORM_IMAGE:-samadeolu7/trade-desk-platform:latest}
+    container_name: trade_desk_engine
     restart: unless-stopped
-    env_file:
-      - .env
-    volumes:
-      - trade_bot_data:/app/data
-      - trade_bot_logs:/app/logs
-    command: ["python", "main.py", "recommend"]
+    env_file: [.env]
+    environment: *platform_env
+    command: ["python", "manage.py", "run_engine"]
+    depends_on:
+      platform-migrate: {condition: service_completed_successfully}
+      platform-redis: {condition: service_healthy}
+    healthcheck:
+      disable: true
 
-  # Recommend feed for 4h-timeframe entries (config.yaml recommend.strategies
-  # entries with `timeframe: 4h`) — one process per candle series.
-  trade-bot-recommend-4h:
-    image: ${DOCKER_IMAGE:-samadeolu7/btc-trade-bot:latest}
-    container_name: btc_trade_bot_recommend_4h
+  # research jobs from the app, plus the engine-down watchdog
+  platform-worker:
+    image: ${PLATFORM_IMAGE:-samadeolu7/trade-desk-platform:latest}
+    container_name: trade_desk_worker
     restart: unless-stopped
-    env_file:
-      - .env
+    env_file: [.env]
+    environment: *platform_env
+    command: ["python", "manage.py", "run_worker"]
+    depends_on:
+      platform-migrate: {condition: service_completed_successfully}
+    healthcheck:
+      disable: true
+
+  platform-frontend:
+    image: ${FRONTEND_IMAGE:-samadeolu7/trade-desk-frontend:latest}
+    container_name: trade_desk_frontend
+    restart: unless-stopped
+    networks: [traefik_public]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik_public"
+      - "traefik.http.routers.desk.rule=Host(`leads.yincools.com.ng`)"
+      - "traefik.http.routers.desk.entrypoints=websecure"
+      - "traefik.http.routers.desk.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.desk.priority=10"
+      - "traefik.http.services.desk.loadbalancer.server.port=80"
+      - "traefik.http.routers.desk-http.rule=Host(`leads.yincools.com.ng`)"
+      - "traefik.http.routers.desk-http.entrypoints=web"
+      - "traefik.http.routers.desk-http.middlewares=desk-https"
+      - "traefik.http.middlewares.desk-https.redirectscheme.scheme=https"
+
+  # nightly database dump, 14 kept, in the platform_backups volume
+  platform-backup:
+    image: postgres:16-alpine
+    container_name: trade_desk_backup
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - trade_bot_data:/app/data
-      - trade_bot_logs:/app/logs
-    command: ["python", "main.py", "recommend", "--timeframe", "4h"]
+      - platform_backups:/backups
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          pg_dump -h platform-db -U trade -d trade -Fc -f /backups/trade-$$(date -u +%Y%m%d-%H%M).dump             && ls -1t /backups/*.dump | tail -n +15 | xargs -r rm --
+          sleep 86400
+        done
+    depends_on:
+      platform-db: {condition: service_healthy}
 
 volumes:
   trade_bot_data:
   trade_bot_logs:
+  platform_db:
+  platform_backups:
+
+networks:
+  traefik_public:
+    external: true
+    name: traefik_public

@@ -9,3 +9,8 @@ logs/*.log
 .pytest_cache/
 .claude/
 debug.log
+backend/dev.sqlite3
+backend/staticfiles/
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo

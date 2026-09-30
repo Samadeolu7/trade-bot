@@ -206,6 +206,7 @@ Added to the `recommend` feed the same day, at the user's explicit request, one 
 - **Holdout enforcement (methodology fix):** the "out-of-sample" test above wasn't actually clean — the donchian exit-channel-width exploration (30/55/70/90) was run against 2023-01-01 onward with no end date, overlapping almost entirely with the same window later used as the 2024+ holdout. That's exactly the parameter-sensitivity/overfitting risk this section already warns about, just self-inflicted. Going forward, `config.yaml`'s `validation.holdout_start` marks a reserved window: `sweep` can never touch it (no override), `backtest` excludes it unless `--allow-holdout` is explicitly passed, and every deliberate use is logged to `notes/holdout_validations.md`. This doesn't retroactively clean the data already looked at — it makes the mistake structurally harder to repeat for any new strategy work from here on.
 - **Experiment log & research degrees of freedom (2026-09-09):** the sweep architecture can silently rack up hundreds of parameter combinations — the classic multiple-testing/selection-bias risk (something will eventually look impressive by chance) — and until now nothing tracked how many. Every `backtest` run, and every individual `sweep` *combination*, now records a row to a new `experiments` table (`bot/storage/db.py`): resolved config (+ a hash), the exact candle window tested, a best-effort git commit, and the full result — so "how many things have we tried" is a real count (`python main.py experiments`), not something that happened in a closed terminal. Rows are never deleted, including rejected ones — the "graveyard" is just `experiments` rows with a `decision` of `"rejected"`. Decisions are **never** set automatically by a backtest/sweep result; the only way one gets recorded is a human running `experiments decide --id N --decision ... --reason ...` — a good in-sample number does not self-promote a strategy, exactly the lesson the donchian exit-channel-width story above already taught the hard way.
 - **Research reports via Telegram (2026-09-29):** `python main.py research-report --strategy X [--param ...]` backtests a strategy, and every `--param` combination, on the fixed train (2020–2023) and test (2024 → `holdout_start`) windows next to a baseline (donchian by default). It sends the result to Telegram as one compact `RESEARCH_REPORT` message written to be pasted straight back into a Claude session. It never touches the holdout (no override), and every window it runs is logged to `experiments` as `kind=research_report`. The "Research Report" GitHub Actions workflow (manual `workflow_dispatch`) runs it on the VPS, backfill included, so evaluating a new idea doesn't need terminal access. It only reports results. Decisions and lifecycle stages stay manual, like everything else here.
+- **Pyramiding research option (2026-09-30):** every test so far held one position per strategy, and the live bots do the same: a repeat entry signal while in a trade is logged ("entry signal again, not adding") and alerted once per position, never acted on. To test whether adding to winners helps, the backtest engine has an optional `pyramid` section (`max_adds`, default 0; `add_step_pct`): a fresh same-direction signal adds a unit sized like an entry (risk_pct over its own stop), only after price has moved `add_step_pct` in the trade's favour, with the combined stop only tightening and total notional capped at equity. It's a research option only: bots refuse it until research supports it and the engine implements it. Try it in a research report with e.g. `pyramid.max_adds = 0, 1, 2, 3`.
 - **Strategy lifecycle (2026-09-09):** each strategy now has an explicit stage (`research → backtested → holdout_passed → shadowing → shadow_review → approved → automation_ready → disabled/retired`, `bot/research/lifecycle.py`), settable only by hand via `python main.py lifecycle set --label X --stage Y` — never advanced automatically by `backtest`/`sweep`/`shadow`/`recommend`. `is_automation_ready(label)` is pure scaffolding right now (no caller anywhere in the codebase), true only once a human has explicitly set a strategy to `automation_ready` — laying the groundwork for a future Phase 5 gate where a strategy's own backtest results can never grant it permission to trade real money; that has to be a separate, explicit decision.
 
 ## 9. Alerting Layer
@@ -253,6 +254,44 @@ A second, independent alert channel — **not** the automated Quidax-fee shadow-
 - Restart policy: `unless-stopped`.
 - All secrets via environment variables injected at deploy time, not baked into the image.
 - Optional: a lightweight health-check/status endpoint for monitoring.
+
+## 12.5. Web platform (2026-09-29)
+
+A trading app replaces the Koya lead scorer at `leads.yincools.com.ng`. The user wanted a standard
+trading app: trade by hand while bots trade on the same or separate accounts, see what each bot is doing
+on a chart, run research, and move from paper to live without UI changes. Decisions:
+
+- **Venues.** Bots trade live on Quidax spot (Section 10). Manual Exness MT5 trading stays advisory via
+  the recommend feed (Section 9.5). An MT5 connector would need a Windows bridge; possible later behind the
+  same broker interface.
+- **Stack.** Django + Django Ninja + Channels, Postgres, Redis, React. The engine is its own process.
+- **One broker interface** (`bot/broker/`). Paper accounts use `PaperBroker` with a venue profile; live
+  accounts will use a Quidax connector. The contract tests in `tests/test_paper_broker.py` are the bar the
+  live connector must also pass.
+- **Access.** Owner, trader and viewer roles with per-account grants. Owners and traders need TOTP 2FA.
+  Every order and control action is in the audit log.
+- **Research discipline carries over.** Research jobs from the app use the same train and test windows
+  as `research-report` and never touch the holdout; holdout checks stay a CLI action. A live bot must be
+  named after a strategy label at `automation_ready`, which only a person can set.
+- **Alerts** replace the fixed Telegram message stream: each person picks rules (price crosses, sudden
+  moves, bot trades, stops, problems, research done, daily summary). The recommend feed keeps its own
+  channel until it moves into the engine.
+
+Quidax API findings (2026-09-29), which shape the design:
+
+- Order types are **limit and market only**. There are no stop orders, so stop-losses and take-profits
+  are held by the engine and sent as market orders when the price reaches them, on paper and live alike.
+  Engine uptime therefore protects open positions; the worker alerts if its heartbeat goes stale.
+- The public `/markets/{market}/order_book` endpoint returns raw order records, including years-old
+  filled orders at price 0. `/markets/{market}/depth` returns the real aggregated book (about 28 BTC per
+  side on BTC/USDT, spread 0.07–0.2%), and paper fills walk that.
+- A sub-accounts API exists, so each live bot can get its own sub-account.
+- Unverified until the live connector is built: minimum order size and step, client order IDs (needed to
+  make retries safe), rate limits, and whether fees are charged in the received asset.
+
+Phase 0 research gates before any live money: the pre-registered `donchian_ensemble` holdout check
+(`notes/holdout_validations.md`), and a research report on `donchian` 4h with `donchian.long_only=1`,
+since the spot venue can't take its shorts (`LongOnlyStrategy`, `bot/strategy/long_only.py`).
 
 ## 13. Suggested Build Order
 

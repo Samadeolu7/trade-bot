@@ -11,9 +11,6 @@ import pandas as pd
 
 from bot.alerting.messages import format_research_report
 from bot.alerting.telegram import TelegramAlerter
-from bot.backtest.engine import run_backtest
-from bot.backtest.exposure import run_exposure_backtest
-from bot.backtest.metrics import breakdown_by_strategy, summarize
 from bot.config import load_config
 from bot.data.backfill import backfill_candles
 from bot.data.exchange import create_exchange
@@ -22,6 +19,7 @@ from bot.data.funding_backfill import backfill_funding_rates
 from bot.data.poll import run_poll_loop
 from bot.logging_setup import configure_logging
 from bot.recommend.runner import run_recommend_loop
+from bot.research.backtest_runner import apply_holdout_guard, run_backtest_summary
 from bot.research.lifecycle import (
     STAGES as LIFECYCLE_STAGES,
     list_lifecycle_stages,
@@ -38,42 +36,14 @@ from bot.storage.db import (
     record_experiment,
     set_experiment_decision,
 )
-from bot.strategy.crt import CandleRangeTheoryStrategy
-from bot.strategy.donchian import DonchianBreakoutStrategy
-from bot.strategy.donchian_ensemble import DonchianEnsembleStrategy
-from bot.strategy.ema_cross import EmaCrossStrategy
-from bot.strategy.flat import FlatStrategy
-from bot.strategy.funding_filter import FundingFilteredStrategy
-from bot.strategy.market_structure import MarketStructureBreakoutStrategy
-from bot.strategy.multi_timeframe import MultiTimeframeTrendPullbackStrategy
-from bot.strategy.regime import NatrRegimeFilter, RegimeFilter, Sma200RegimeFilter
-from bot.strategy.regime_switch import RegimeSwitchedStrategy
-from bot.strategy.rsi_bb import RsiBollingerStrategy
-from bot.strategy.vol_expansion import VolatilityExpansionBreakoutStrategy
 from bot.strategy.base import Strategy
+from bot.strategy.registry import (
+    STRATEGY_CHOICES,
+    TREND_STRATEGY_CHOICES,
+    build_strategy as _build_strategy,
+)
 
 logger = logging.getLogger(__name__)
-
-STRATEGY_CHOICES = [
-    "ema_cross", "rsi_bb", "donchian", "market_structure", "multi_timeframe", "vol_expansion",
-    "funding_filtered", "regime_switched", "crt", "donchian_ensemble",
-]
-TREND_STRATEGY_CHOICES = [
-    "ema_cross", "donchian", "market_structure", "multi_timeframe", "vol_expansion",
-]
-
-
-def _build_trend_strategy(name: str, strategy_config: dict) -> Strategy:
-    if name == "donchian":
-        return DonchianBreakoutStrategy(strategy_config.get("donchian", {}))
-    if name == "market_structure":
-        return MarketStructureBreakoutStrategy(strategy_config.get("market_structure", {}))
-    if name == "multi_timeframe":
-        return MultiTimeframeTrendPullbackStrategy(strategy_config.get("multi_timeframe", {}))
-    if name == "vol_expansion":
-        return VolatilityExpansionBreakoutStrategy(strategy_config.get("vol_expansion", {}))
-    return EmaCrossStrategy(strategy_config.get("ema_cross", {}))
-
 
 def _add_strategy_override_args(parser: argparse.ArgumentParser) -> None:
     """Shared by `shadow` and `diagnose` — both need to build the exact same
@@ -179,12 +149,6 @@ def _apply_strategy_overrides(strategy_config: dict, overrides: dict) -> dict:
     return strategy_config
 
 
-def _empty_funding_df() -> pd.DataFrame:
-    return pd.DataFrame(
-        {"funding_rate": []}, index=pd.DatetimeIndex([], tz="UTC", name="funding_time")
-    )
-
-
 def _load_funding_df(config: dict, conn) -> pd.DataFrame:
     """Backfills (resume=True — cheap no-op if already caught up) then reads
     back funding-rate history from its own exchange identity (funding is a
@@ -197,25 +161,6 @@ def _load_funding_df(config: dict, conn) -> pd.DataFrame:
     funding_exchange = create_funding_exchange(exchange_id)
     backfill_funding_rates(funding_exchange, conn, exchange_id, symbol, start_date, resume=True)
     return query_funding_rates_df(conn, exchange_id, symbol)
-
-
-def _build_ranging_strategy(name: str, strategy_config: dict) -> Strategy:
-    if name == "rsi_bb":
-        return RsiBollingerStrategy(strategy_config.get("rsi_bb", {}))
-    return FlatStrategy()
-
-
-def _build_regime_filter(strategy_config: dict):
-    regime_config = strategy_config.get("regime", {})
-    regime_type = regime_config.get("type", "adx")
-    if regime_type == "sma200":
-        return Sma200RegimeFilter(**strategy_config.get("regime_sma", {}))
-    if regime_type == "natr":
-        return NatrRegimeFilter(**strategy_config.get("regime_natr", {}))
-    return RegimeFilter(
-        adx_period=regime_config.get("adx_period", 14),
-        adx_threshold=regime_config.get("adx_threshold", 25),
-    )
 
 
 def _with_override(strategy_config: dict, section: str, key: str, value) -> dict:
@@ -242,52 +187,8 @@ def parse_param_arg(arg: str) -> tuple[str, str, list]:
     return section, key, values
 
 
-def _run_backtest_once(
-    df: pd.DataFrame,
-    strategy_name: str,
-    strategy_config: dict,
-    backtest_config: dict,
-    timeframe: str,
-    funding_df: pd.DataFrame | None = None,
-    warmup_df: pd.DataFrame | None = None,
-) -> dict:
-    """`warmup_df`: longer history ending where `df` ends, used only by
-    exposure strategies (fraction-of-capital sizing, e.g. donchian_ensemble)
-    to compute targets before the window starts — their longest lookback is
-    a year, which would otherwise sit idle through the first year of `df`."""
-    strategy = _build_strategy(strategy_name, strategy_config, funding_df=funding_df)
-    if hasattr(strategy, "target_weights"):
-        weights = None
-        if warmup_df is not None and len(warmup_df):
-            weights = strategy.target_weights(warmup_df).reindex(df.index)
-        result = run_exposure_backtest(
-            df,
-            strategy,
-            fee=backtest_config.get("fee", 0.001),
-            slippage=backtest_config.get("slippage", 0.0005),
-            initial_capital=backtest_config.get("initial_capital", 10_000.0),
-            weights=weights,
-        )
-    else:
-        result = run_backtest(
-            df,
-            strategy,
-            fee=backtest_config.get("fee", 0.001),
-            slippage=backtest_config.get("slippage", 0.0005),
-            initial_capital=backtest_config.get("initial_capital", 10_000.0),
-            risk_pct=backtest_config.get("risk_pct", 0.01),
-        )
-    summary = summarize(
-        result.trades,
-        result.equity_curve,
-        backtest_config.get("initial_capital", 10_000.0),
-        timeframe,
-        close=df["close"],
-    )
-    by_strategy = breakdown_by_strategy(result.trades)
-    if len(by_strategy) > 1:
-        summary["by_strategy"] = by_strategy
-    return summary
+def _run_backtest_once(*args, **kwargs) -> dict:
+    return run_backtest_summary(*args, **kwargs)[0]
 
 
 def _git_commit_hash() -> str | None:
@@ -356,35 +257,6 @@ def _fmt_date(ts) -> str:
 HOLDOUT_LOG_PATH = Path("notes/holdout_validations.md")
 
 
-def apply_holdout_guard(
-    df: pd.DataFrame, holdout_start: str | None, allow_holdout: bool, context_label: str
-) -> tuple[pd.DataFrame, bool]:
-    """Excludes any bar at/after `holdout_start` unless `allow_holdout` is
-    set, so tuning/exploration can't silently peek at the reserved
-    out-of-sample window. Returns (possibly-truncated df, whether holdout
-    data was actually included). A no-op if holdout_start is unset or the
-    data doesn't reach it anyway."""
-    if not holdout_start or len(df) == 0:
-        return df, False
-    holdout_ts = pd.Timestamp(holdout_start, tz="UTC")
-    if df.index.max() < holdout_ts:
-        return df, False
-    if not allow_holdout:
-        excluded = int((df.index >= holdout_ts).sum())
-        logger.warning(
-            "%s: excluding %d reserved holdout bar(s) from %s onward "
-            "(pass --allow-holdout for a deliberate final confirmatory check)",
-            context_label, excluded, holdout_start,
-        )
-        return df[df.index < holdout_ts], False
-    logger.warning(
-        "%s: HOLDOUT DATA INCLUDED (from %s onward) — this should be a rare, "
-        "deliberate final check per candidate strategy, not part of routine tuning",
-        context_label, holdout_start,
-    )
-    return df, True
-
-
 def log_holdout_validation(
     strategy_label: str, symbol: str, timeframe: str, start: str | None, end: str | None, summary: dict
 ) -> None:
@@ -396,62 +268,6 @@ def log_holdout_validation(
         f.write(f"\n## {pd.Timestamp.now(tz='UTC').isoformat()} — {strategy_label} on {symbol} {timeframe}\n")
         f.write(f"- window: {start or '(full history)'} to {end or '(latest)'}\n")
         f.write(f"- result: {summary}\n")
-
-
-def _build_strategy(
-    name: str,
-    strategy_config: dict,
-    funding_df: pd.DataFrame | None = None,
-    funding_refresh_fn=None,
-) -> Strategy:
-    if name == "ema_cross":
-        return EmaCrossStrategy(strategy_config.get("ema_cross", {}))
-    if name == "rsi_bb":
-        return RsiBollingerStrategy(strategy_config.get("rsi_bb", {}))
-    if name == "donchian":
-        return DonchianBreakoutStrategy(strategy_config.get("donchian", {}))
-    if name == "market_structure":
-        return MarketStructureBreakoutStrategy(strategy_config.get("market_structure", {}))
-    if name == "multi_timeframe":
-        return MultiTimeframeTrendPullbackStrategy(strategy_config.get("multi_timeframe", {}))
-    if name == "vol_expansion":
-        return VolatilityExpansionBreakoutStrategy(strategy_config.get("vol_expansion", {}))
-    if name == "crt":
-        return CandleRangeTheoryStrategy(strategy_config.get("crt", {}))
-    if name == "donchian_ensemble":
-        return DonchianEnsembleStrategy(strategy_config.get("donchian_ensemble", {}))
-    if name == "funding_filtered":
-        # base_strategy/high_threshold/low_threshold are config-driven (same
-        # pattern as regime_switched's trend_strategy), not separate
-        # --strategy choices — funding_df/funding_refresh_fn come from the
-        # caller since building them needs a DB connection this function
-        # doesn't otherwise take.
-        funding_filtered_config = strategy_config.get("funding_filtered", {})
-        base_name = funding_filtered_config.get("base_strategy", "donchian")
-        base = _build_trend_strategy(base_name, strategy_config)
-        high_threshold = funding_filtered_config.get("high_threshold", 0.0005)
-        low_threshold = funding_filtered_config.get("low_threshold", -0.0005)
-        return FundingFilteredStrategy(
-            base,
-            funding_df if funding_df is not None else _empty_funding_df(),
-            high_threshold,
-            low_threshold,
-            refresh_fn=funding_refresh_fn,
-        )
-
-    # regime_switched: trend/ranging sub-strategies and regime-filter type are
-    # config-driven (spec Section 1), not separate --strategy choices, so
-    # e.g. swapping ADX for SMA(200) or ema_cross for donchian is a
-    # config/config.yaml edit, not a code change. ranging_strategy defaults to
-    # "flat" (spec Section 8 pilot findings: rsi_bb didn't demonstrate a real
-    # edge and is opt-in only) rather than "rsi_bb".
-    regime_switched_config = strategy_config.get("regime_switched", {})
-    trend_name = regime_switched_config.get("trend_strategy", "ema_cross")
-    ranging_name = regime_switched_config.get("ranging_strategy", "flat")
-    trending_strategy = _build_trend_strategy(trend_name, strategy_config)
-    ranging_strategy = _build_ranging_strategy(ranging_name, strategy_config)
-    regime_filter = _build_regime_filter(strategy_config)
-    return RegimeSwitchedStrategy(trending_strategy, ranging_strategy, regime_filter)
 
 
 def main() -> None:
@@ -934,7 +750,8 @@ def main() -> None:
         # producing N identical "variants" — refuse instead. Wrapper
         # strategies legitimately configure other sections, so skip them.
         if args.strategy not in ("regime_switched", "funding_filtered"):
-            foreign = sorted({section for section, _, _ in grid if section != args.strategy})
+            # "pyramid" is the backtest engine's own option, valid for any strategy
+            foreign = sorted({section for section, _, _ in grid if section not in (args.strategy, "pyramid")})
             if foreign:
                 parser.error(
                     f"--param section(s) {', '.join(foreign)} don't apply to --strategy {args.strategy}"

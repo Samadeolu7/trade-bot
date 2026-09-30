@@ -16,6 +16,8 @@ class Trade:
     pnl: float
     exit_reason: str
     strategy_name: str
+    # extra units added to the position after the first entry (pyramiding)
+    adds: int = 0
 
 
 @dataclass
@@ -103,6 +105,22 @@ def close_position(
     return net_pnl, effective_exit
 
 
+def add_to_position(position: dict, price: float, size: float, stop: float, fee: float, slippage: float) -> None:
+    """Pyramiding: adds `size` at `price` to an open position. The position
+    becomes one blended position (size-weighted entry, summed entry fees),
+    so check_exit/close_position work on it unchanged. Its stop only ever
+    tightens: the new signal's stop is taken only if it's closer."""
+    long = position["direction"] == "long"
+    effective = price * (1 + slippage) if long else price * (1 - slippage)
+    total = position["size"] + size
+    position["entry_price"] = (position["entry_price"] * position["size"] + effective * size) / total
+    position["size"] = total
+    position["entry_fee"] += effective * size * fee
+    position["stop"] = max(position["stop"], stop) if long else min(position["stop"], stop)
+    position["adds"] = position.get("adds", 0) + 1
+    position["last_fill"] = effective
+
+
 def _unrealized_pnl(position: dict, bar: pd.Series) -> float:
     price = bar["close"]
     if position["direction"] == "long":
@@ -117,6 +135,7 @@ def run_backtest(
     slippage: float = 0.0005,
     initial_capital: float = 10_000.0,
     risk_pct: float = 0.01,
+    pyramid: dict | None = None,
 ) -> BacktestResult:
     """Bar-by-bar simulation: manages at most one open position at a time,
     sized off the stop-loss distance and closed out on stop/target/end-of-data.
@@ -128,7 +147,16 @@ def run_backtest(
     numerically restarts each one's "memory" every window instead of letting
     it run continuously. Trailing-stop updates still use a bounded window,
     since they're only needed on the much rarer bars where a position is
-    actually open."""
+    actually open.
+
+    `pyramid` (research option, off by default): {"max_adds": N,
+    "add_step_pct": x}. While in a position, a fresh entry signal in the same
+    direction adds a unit, sized like an entry (risk_pct of current equity
+    over the new signal's stop distance), up to N adds, and only once price
+    has moved at least x (a fraction) in the trade's favour since the last
+    fill. Total notional is capped at equity: spot, no leverage."""
+    max_adds = int((pyramid or {}).get("max_adds", 0) or 0)
+    add_step = float((pyramid or {}).get("add_step_pct", 0.0) or 0.0)
     lookback = strategy.min_lookback
     if len(df) <= lookback:
         return BacktestResult()
@@ -165,11 +193,24 @@ def run_backtest(
                         pnl=pnl,
                         exit_reason=exit_reason,
                         strategy_name=position["strategy"].name,
+                        adds=position.get("adds", 0),
                     )
                 )
                 position = None
 
-        if position is None:
+        if position is not None and max_adds and position.get("adds", 0) < max_adds:
+            sig_row = signals.iloc[i]
+            if sig_row["direction"] == position["direction"]:
+                price = float(sig_row["entry_price"])
+                sign = 1 if position["direction"] == "long" else -1
+                moved = (price / position["last_fill"] - 1) * sign
+                if moved >= add_step:
+                    equity_now = equity + _unrealized_pnl(position, bar)
+                    size = position_size(equity_now, risk_pct, price, float(sig_row["stop_loss"]))
+                    size = min(size, max(0.0, equity_now / price - position["size"]))
+                    if size > 0:
+                        add_to_position(position, price, size, float(sig_row["stop_loss"]), fee, slippage)
+        elif position is None:
             sig_row = signals.iloc[i]
             if pd.notna(sig_row["direction"]):
                 take_profit = sig_row["take_profit"]
@@ -187,6 +228,7 @@ def run_backtest(
                 if size > 0:
                     owner = sig_row["strategy"] if has_owner_column else strategy
                     position = open_position(signal, size, fee, slippage, owner)
+                    position["last_fill"] = position["entry_price"]
 
         unrealized = _unrealized_pnl(position, bar) if position is not None else 0.0
         times.append(bar.name)
@@ -207,6 +249,7 @@ def run_backtest(
                 pnl=pnl,
                 exit_reason="end_of_data",
                 strategy_name=position["strategy"].name,
+                adds=position.get("adds", 0),
             )
         )
         values[-1] = equity

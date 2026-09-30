@@ -1,0 +1,53 @@
+# One-off: bring the retired CLI runs into the web platform. Copies their
+# history (import_sqlite) and recreates the shadow runs as paper bots and the
+# recommend feed as recommendation feeds, continuing from their last positions
+# (seed_shadow_bots). Safe to re-run. Delete this workflow once it has run.
+name: Seed platform from shadow runs
+
+on:
+  workflow_dispatch:
+    inputs:
+      owner:
+        description: "Your username in the app (the bots are created by this user)"
+        required: true
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  DEPLOY_PATH: /opt/btc-trade-bot
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate input
+        env:
+          OWNER: ${{ inputs.owner }}
+        run: '[[ "$OWNER" =~ ^[A-Za-z0-9@.+_-]+$ ]] || { echo "bad username"; exit 1; }'
+
+      - name: Import history and seed bots
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          OWNER: ${{ inputs.owner }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: OWNER
+          command_timeout: 15m
+          script: |
+            set -e
+            cd ${{ env.DEPLOY_PATH }}
+            # the retired CLI runs' database is mounted read-only at /legacy
+            # in the web container (docker-compose.yml); nothing writes to it
+            # any more, so it's read in place
+
+            echo "==> Importing history (candles, funding, experiments, stages, shadow trades)"
+            docker compose exec -T platform-web python manage.py import_sqlite /legacy/trades.db
+
+            echo "==> Recreating the shadow runs as paper bots and the recommend feed (only what's missing)"
+            docker compose exec -T platform-web python manage.py seed_shadow_bots /legacy/trades.db --owner "$OWNER"
+            echo "==> Done"

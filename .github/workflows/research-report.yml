@@ -36,6 +36,7 @@ on:
         default: "no"
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   DEPLOY_PATH: /opt/btc-trade-bot
 
 jobs:
@@ -86,17 +87,20 @@ jobs:
             # its whole train window. From 2018, not 2020: the train window
             # still starts 2020-01-01, but long-lookback strategies
             # (donchian_ensemble's 360-day model) need a warmup year before it.
-            docker compose run --rm trade-bot python main.py backfill \
+            docker compose run --rm cli python main.py backfill \
               --symbol "$SYMBOL" --timeframe "$TIMEFRAME" --start 2018-01-01T00:00:00Z --no-resume
-            # sequential on purpose: one SQLite writer at a time alongside the
-            # live shadow runs. One strategy failing doesn't stop the rest.
+            # sequential on purpose: one SQLite writer at a time; one strategy
+            # failing doesn't stop the rest.
             extra=""
             if [ "$HOLDOUT" = "yes" ]; then extra="--holdout"; fi
             failed=""
             for s in $(echo "$STRATEGY" | tr "," " "); do
               echo "==> research-report $s"
-              docker compose run --rm trade-bot python main.py research-report \
+              docker compose run --rm cli python main.py research-report \
                 --strategy "$s" --symbol "$SYMBOL" --timeframe "$TIMEFRAME" --baseline "$BASELINE" $PARAMS $extra \
                 || failed="$failed $s"
             done
+            # the CLI writes to its own SQLite database; copy the new
+            # experiment rows into the web app so the report shows there too
+            docker compose exec -T platform-web python manage.py import_sqlite /legacy/trades.db --only-experiments               || echo "warning: couldn't copy the results into the app"
             if [ -n "$failed" ]; then echo "FAILED:$failed"; exit 1; fi
