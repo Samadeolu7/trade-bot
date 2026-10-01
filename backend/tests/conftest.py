@@ -18,6 +18,14 @@ def _settings(db, settings):
     cache.clear()
 
 
+@pytest.fixture(autouse=True)
+def _old_candles_are_fresh(monkeypatch):
+    """Test candles start in 2024; the stale-data check has its own tests."""
+    from market import health
+
+    monkeypatch.setattr(health, "STALE_PERIODS", 10**6)
+
+
 @pytest.fixture
 def quotes():
     """Every venue quotes from one controllable static source."""

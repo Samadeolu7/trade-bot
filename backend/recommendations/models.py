@@ -40,6 +40,11 @@ class Feed(models.Model):
     near_miss_key = models.CharField(max_length=80, blank=True)
     # the open call + direction a repeat entry signal was last reported for
     repeat_signal_key = models.CharField(max_length=80, blank=True)
+    # kill switch: a halted feed makes no calls until a person resumes it.
+    # Set by a failed data health check or by hand.
+    halted = models.BooleanField(default=False)
+    halt_reason = models.CharField(max_length=300, blank=True)
+    halted_at = models.DateTimeField(null=True, blank=True)
 
     # the recommended position (signal strategies)
     direction = models.CharField(max_length=5, blank=True)  # "", "long", "short"
@@ -85,6 +90,9 @@ class Recommendation(models.Model):
         REBALANCE = "rebalance", "Resize"
         NEAR_MISS = "near_miss", "Near miss"
         SIGNAL_AGAIN = "signal_again", "Signal again"
+        # signals stopped (data failed its health check, or paused by hand)
+        SUPPRESSED = "suppressed", "Signals paused"
+        RESUMED = "resumed", "Signals resumed"
 
     feed = models.ForeignKey(Feed, on_delete=models.CASCADE, related_name="recommendations")
     kind = models.CharField(max_length=12, choices=Kind.choices)
@@ -105,3 +113,17 @@ class Recommendation(models.Model):
 
     class Meta:
         ordering = ["-bar_time", "-id"]
+
+
+class SignalSwitch(models.Model):
+    """The global kill switch for recommendations: while halted, no feed
+    makes any call. One row (pk=1)."""
+
+    halted = models.BooleanField(default=False)
+    reason = models.CharField(max_length=300, blank=True)
+    changed_at = models.DateTimeField(null=True, blank=True)
+    changed_by = models.CharField(max_length=150, blank=True)
+
+    @classmethod
+    def get(cls) -> "SignalSwitch":
+        return cls.objects.get_or_create(pk=1)[0]

@@ -1,11 +1,13 @@
 from datetime import datetime
 
+from django.utils import timezone
 from ninja import Router, Schema
 from ninja.errors import HttpError
 
 from bot.broker.base import BrokerError
 from core.audit import audit
-from recommendations.models import Feed, Recommendation
+from recommendations.models import Feed, Recommendation, SignalSwitch
+from recommendations.runner import halt_feed, resume_feed
 from trading.permissions import require_owner
 from trading.services.brokers import quote_source
 
@@ -39,6 +41,9 @@ class FeedOut(Schema):
     lot_step: float
     risk_pct: float
     lots_held: float
+    halted: bool
+    halt_reason: str
+    halted_at: datetime | None
 
 
 def _mid(symbol: str) -> float | None:
@@ -67,6 +72,7 @@ def _feed_out(feed: Feed, prices: dict) -> dict:
         "last_bar_at": feed.last_bar_at, "last_run_at": feed.last_run_at, "status_reason": feed.status_reason,
         "capital": feed.capital, "current_capital": feed.current_capital, "contract_size": feed.contract_size,
         "min_lot": feed.min_lot, "lot_step": feed.lot_step, "risk_pct": feed.risk_pct, "lots_held": feed.lots_held,
+        "halted": feed.halted, "halt_reason": feed.halt_reason, "halted_at": feed.halted_at,
     }
 
 
@@ -131,6 +137,90 @@ def set_sizing(request, feed_id: int, payload: SizingIn):
           contract_size=payload.contract_size, min_lot=payload.min_lot, risk_pct=payload.risk_pct,
           lots_held=feed.lots_held)
     return _feed_out(feed, {})
+
+
+def _get_feed(feed_id: int) -> Feed:
+    feed = Feed.objects.filter(pk=feed_id).first()
+    if feed is None:
+        raise HttpError(404, "no such feed")
+    return feed
+
+
+class HaltIn(Schema):
+    reason: str
+
+
+@router.post("/feeds/{feed_id}/halt", response=FeedOut)
+def halt(request, feed_id: int, payload: HaltIn):
+    """Kill switch for one feed: no calls until resumed."""
+    require_owner(request)
+    feed = _get_feed(feed_id)
+    reason = payload.reason.strip()
+    if not reason:
+        raise HttpError(400, "say why you're pausing it")
+    if feed.halted:
+        raise HttpError(409, "already paused")
+    halt_feed(feed, f"paused by {request.user.username}: {reason}", by=request.user.username)
+    audit("recommendations.halt", request=request, target=f"feed:{feed.name}", reason=reason)
+    return _feed_out(feed, {})
+
+
+class ResumeIn(Schema):
+    # you've looked at why it paused and at your MT5 position
+    acknowledged: bool
+    note: str = ""
+
+
+@router.post("/feeds/{feed_id}/resume", response=FeedOut)
+def resume(request, feed_id: int, payload: ResumeIn):
+    require_owner(request)
+    feed = _get_feed(feed_id)
+    if not feed.halted:
+        raise HttpError(409, "not paused")
+    if not payload.acknowledged:
+        raise HttpError(400, "confirm you've checked the reason and your MT5 position first")
+    reason = feed.halt_reason
+    resume_feed(feed, by=request.user.username, note=payload.note)
+    audit("recommendations.resume", request=request, target=f"feed:{feed.name}", after=reason, note=payload.note)
+    return _feed_out(feed, {})
+
+
+class SwitchOut(Schema):
+    halted: bool
+    reason: str
+    changed_at: datetime | None
+    changed_by: str
+
+
+class SwitchIn(Schema):
+    halted: bool
+    reason: str = ""
+
+
+def _switch_out(switch: SignalSwitch) -> dict:
+    return {"halted": switch.halted, "reason": switch.reason, "changed_at": switch.changed_at,
+            "changed_by": switch.changed_by}
+
+
+@router.get("/switch", response=SwitchOut)
+def get_switch(request):
+    return _switch_out(SignalSwitch.get())
+
+
+@router.post("/switch", response=SwitchOut)
+def set_switch(request, payload: SwitchIn):
+    """Global kill switch: pause or resume every feed at once."""
+    require_owner(request)
+    if payload.halted and not payload.reason.strip():
+        raise HttpError(400, "say why you're pausing all signals")
+    switch = SignalSwitch.get()
+    switch.halted = payload.halted
+    switch.reason = payload.reason.strip()[:300] if payload.halted else ""
+    switch.changed_at = timezone.now()
+    switch.changed_by = request.user.username
+    switch.save()
+    audit("recommendations.switch", request=request, halted=payload.halted, reason=payload.reason)
+    return _switch_out(switch)
 
 
 class RecommendationOut(Schema):

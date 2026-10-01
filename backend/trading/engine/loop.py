@@ -30,6 +30,7 @@ from bot.broker.base import BrokerError
 from bot.data.exchange import create_exchange
 from bot.shadow.runner import drop_incomplete_bar
 from market.candles import backfill_candles, backfill_funding, candles_df, funding_df
+from market.health import check_series
 from alerts.models import AlertRule
 from alerts.service import PriceHistory, daily_summaries, evaluate_prices, notify
 from trading.engine.adapters import Outcome, evaluate_exposure_bot, evaluate_signal_bot, jsonable
@@ -265,6 +266,23 @@ class Engine:
         bar_time = df.index[-1].to_pydatetime()
         if bot.last_bar_at is not None and bar_time <= bot.last_bar_at:
             return None
+        health = check_series(df, bot.timeframe)
+        if not health.ok:
+            # no decision from bad data; the bar is retried each tick in case
+            # the candles are repaired, and stops are still watched live
+            reason = f"data check failed: {health.summary()}"[:300]
+            decision, _ = BotDecision.objects.update_or_create(
+                bot=bot, bar_time=bar_time,
+                defaults={"action": BotDecision.Action.BLOCKED, "reason": reason, "diagnosis": {},
+                          "order": None, "price": float(df["close"].iloc[-1])},
+            )
+            if bot.status_reason != reason:
+                bot.status_reason = reason
+                bot.save(update_fields=["status_reason"])
+                notify(AlertRule.Kind.BOT_ERROR, f"SIGNALS PAUSED: {bot.name}",
+                       f"Reason: {reason}. No new trades from this bot until the data is healthy again; "
+                       "open positions keep their stops.", account=bot.account, bot=bot)
+            return decision
 
         quote = quote_source(bot.account.venue).quote(bot.symbol)
         adapter = evaluate_exposure_bot if exposure else evaluate_signal_bot

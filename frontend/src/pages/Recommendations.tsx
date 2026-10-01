@@ -8,7 +8,11 @@ import { ago, dateTime, money, pct, titleCase } from '../lib/format'
 type Feed = Schemas['FeedOut']
 type Event = Schemas['RecommendationOut']
 
-const keys = { feeds: ['recommendations', 'feeds'], events: (q: object) => ['recommendations', 'events', q] }
+const keys = {
+  feeds: ['recommendations', 'feeds'],
+  switch: ['recommendations', 'switch'],
+  events: (q: object) => ['recommendations', 'events', q],
+}
 
 function Call({ feed }: { feed: Feed }) {
   if (feed.kind === 'exposure') {
@@ -104,6 +108,128 @@ function SizingDialog({ feed, onClose }: { feed: Feed; onClose: () => void }) {
   )
 }
 
+/** Kill switch for one feed. Resuming needs you to confirm you've looked at
+ *  why it paused and at your MT5 position. */
+function HaltDialog({ feed, onClose }: { feed: Feed; onClose: () => void }) {
+  const qc = useQueryClient()
+  const [reason, setReason] = useState('')
+  const [checked, setChecked] = useState(false)
+  const [note, setNote] = useState('')
+  const [error, setError] = useState<unknown>(null)
+  const submit = async () => {
+    setError(null)
+    try {
+      const params = { path: { feed_id: feed.id } }
+      await unwrap(
+        feed.halted
+          ? client.POST('/api/recommendations/feeds/{feed_id}/resume', { params, body: { acknowledged: checked, note } })
+          : client.POST('/api/recommendations/feeds/{feed_id}/halt', { params, body: { reason } }),
+      )
+      qc.invalidateQueries({ queryKey: ['recommendations'] })
+      onClose()
+    } catch (err) {
+      setError(err)
+    }
+  }
+  return (
+    <Dialog open title={`${feed.halted ? 'Resume' : 'Pause'} signals: ${feed.name}`} onClose={onClose}>
+      <div className="space-y-3">
+        {feed.halted ? (
+          <>
+            <p className="text-[13px]">
+              <span className="font-semibold">Paused because:</span> {feed.halt_reason}
+            </p>
+            <p className="text-[13px] text-ink-2">
+              Candles that closed while paused were not evaluated. After resuming, the next completed candle is checked
+              as usual; make sure your MT5 position matches this feed first.
+            </p>
+            <label className="flex items-start gap-2 text-[13px]">
+              <input type="checkbox" className="mt-0.5" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
+              I've checked the reason above and my MT5 position for this strategy.
+            </label>
+            <Field label="Note (optional)">
+              <input className={inputClass} value={note} onChange={(e) => setNote(e.target.value)} />
+            </Field>
+          </>
+        ) : (
+          <>
+            <p className="text-[13px] text-ink-2">
+              No alerts from this feed until you resume it. Your MT5 position and its stop loss stay as they are.
+            </p>
+            <Field label="Why are you pausing it?">
+              <input className={inputClass} value={reason} onChange={(e) => setReason(e.target.value)} />
+            </Field>
+          </>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button
+            variant={feed.halted ? 'primary' : 'danger'}
+            disabled={feed.halted ? !checked : !reason.trim()}
+            onClick={submit}
+          >
+            {feed.halted ? 'Resume' : 'Pause'}
+          </Button>
+        </div>
+        <ErrorText error={error} />
+      </div>
+    </Dialog>
+  )
+}
+
+/** Global kill switch: pauses every feed at once. */
+function SignalSwitch() {
+  const qc = useQueryClient()
+  const { data: me } = useMe()
+  const { data } = useQuery({
+    queryKey: keys.switch,
+    queryFn: () => unwrap(client.GET('/api/recommendations/switch')),
+    refetchInterval: 30_000,
+  })
+  const [reason, setReason] = useState('')
+  const flip = useMutation({
+    mutationFn: (halted: boolean) =>
+      unwrap(client.POST('/api/recommendations/switch', { body: { halted, reason: halted ? reason : '' } })),
+    onSuccess: () => {
+      setReason('')
+      qc.invalidateQueries({ queryKey: ['recommendations'] })
+    },
+  })
+  if (!data) return null
+  const owner = me?.role === 'owner'
+  if (data.halted)
+    return (
+      <div className="flex flex-wrap items-center gap-3 rounded-md border border-down p-3 text-[13px]">
+        <span className="font-semibold text-down">All signals paused</span>
+        <span className="text-ink-2">
+          {data.reason} ({data.changed_by}, {ago(data.changed_at)})
+        </span>
+        {owner && (
+          <Button size="sm" variant="primary" onClick={() => flip.mutate(false)}>
+            Resume all
+          </Button>
+        )}
+        <ErrorText error={flip.error} />
+      </div>
+    )
+  if (!owner) return null
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-[13px]">
+      <input
+        className={`${inputClass} h-8 w-64`}
+        placeholder="Reason (e.g. CPI release, exchange outage)"
+        aria-label="Reason to pause all signals"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+      />
+      <Button size="sm" variant="danger" disabled={!reason.trim()} onClick={() => flip.mutate(true)}>
+        Pause all signals
+      </Button>
+      <ErrorText error={flip.error} />
+    </div>
+  )
+}
+
 function Feeds() {
   const qc = useQueryClient()
   const { data: me } = useMe()
@@ -113,6 +239,7 @@ function Feeds() {
     refetchInterval: 30_000,
   })
   const [sizing, setSizing] = useState<Feed | null>(null)
+  const [halting, setHalting] = useState<Feed | null>(null)
   const toggle = useMutation({
     mutationFn: (f: Feed) =>
       unwrap(
@@ -144,7 +271,7 @@ function Feeds() {
             <th>Near miss</th>
             <th>Checked</th>
             <th className="r">Your balance</th>
-            {me?.role === 'owner' && <th>On</th>}
+            {me?.role === 'owner' && <th>Control</th>}
           </tr>
         </thead>
         <tbody>
@@ -158,6 +285,11 @@ function Feeds() {
               </td>
               <td>
                 <Call feed={f} />
+                {f.halted && (
+                  <div className="text-[12px] font-semibold text-down" title={f.halt_reason}>
+                    Signals paused
+                  </div>
+                )}
               </td>
               <td className="num r">{f.kind === 'position' ? money(f.stop) : '—'}</td>
               <td className={`num r ${f.open_pnl_pct == null ? '' : f.open_pnl_pct >= 0 ? 'text-up' : 'text-down'}`}>
@@ -183,10 +315,13 @@ function Feeds() {
                 )}
               </td>
               {me?.role === 'owner' && (
-                <td>
+                <td className="whitespace-nowrap">
+                  <Button size="sm" variant={f.halted ? 'primary' : 'ghost'} className="mr-2" onClick={() => setHalting(f)}>
+                    {f.halted ? 'Resume' : 'Pause'}
+                  </Button>
                   <input
                     type="checkbox"
-                    aria-label={`${f.enabled ? 'Pause' : 'Resume'} ${f.name}`}
+                    aria-label={`${f.enabled ? 'Turn off' : 'Turn on'} ${f.name}`}
                     checked={f.enabled}
                     onChange={() => toggle.mutate(f)}
                     className="h-4 w-4 accent-[var(--paper)]"
@@ -199,6 +334,7 @@ function Feeds() {
       </table>
       <ErrorText error={toggle.error} />
       {sizing && <SizingDialog feed={sizing} onClose={() => setSizing(null)} />}
+      {halting && <HaltDialog feed={halting} onClose={() => setHalting(null)} />}
     </div>
   )
 }
@@ -215,6 +351,10 @@ function describe(e: Event): string {
       return `${titleCase(e.direction)} signal again at ${money(e.price)} (call unchanged)`
     case 'rebalance':
       return `Resize from ${pct(e.from_weight, 0, false)} to ${pct(e.to_weight, 0, false)} at ${money(e.price)}`
+    case 'suppressed':
+      return 'Signals paused'
+    case 'resumed':
+      return 'Signals resumed'
     default:
       return 'Near miss'
   }
@@ -305,6 +445,7 @@ export default function Recommendations() {
           keep your own stop in MT5 where the call says.
         </p>
       </div>
+      <SignalSwitch />
       <Panel title="Current calls" flush>
         <Feeds />
       </Panel>

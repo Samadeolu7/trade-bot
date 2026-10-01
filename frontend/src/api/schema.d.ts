@@ -700,6 +700,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/recommendations/feeds/{feed_id}/halt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Halt
+         * @description Kill switch for one feed: no calls until resumed.
+         */
+        post: operations["recommendations_api_halt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/recommendations/feeds/{feed_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume */
+        post: operations["recommendations_api_resume"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/recommendations/feeds/{feed_id}/sizing": {
         parameters: {
             query?: never;
@@ -714,6 +751,27 @@ export interface paths {
          * @description Lets alerts give exact MT5 lot sizes for this feed.
          */
         post: operations["recommendations_api_set_sizing"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/recommendations/switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Switch */
+        get: operations["recommendations_api_get_switch"];
+        put?: never;
+        /**
+         * Set Switch
+         * @description Global kill switch: pause or resume every feed at once.
+         */
+        post: operations["recommendations_api_set_switch"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1429,6 +1487,12 @@ export interface components {
             entry_time: string | null;
             /** Equity */
             equity: number;
+            /** Halt Reason */
+            halt_reason: string;
+            /** Halted */
+            halted: boolean;
+            /** Halted At */
+            halted_at: string | null;
             /** Id */
             id: number;
             /** Kind */
@@ -1507,6 +1571,11 @@ export interface components {
             account_name: string;
             /** Role */
             role: string;
+        };
+        /** HaltIn */
+        HaltIn: {
+            /** Reason */
+            reason: string;
         };
         /** JobIn */
         JobIn: {
@@ -1892,6 +1961,16 @@ export interface components {
             /** To Weight */
             to_weight: number | null;
         };
+        /** ResumeIn */
+        ResumeIn: {
+            /** Acknowledged */
+            acknowledged: boolean;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
         /** RuleIn */
         RuleIn: {
             /** Account Id */
@@ -2054,6 +2133,27 @@ export interface components {
             kind: string;
             /** Name */
             name: string;
+        };
+        /** SwitchIn */
+        SwitchIn: {
+            /** Halted */
+            halted: boolean;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
+        /** SwitchOut */
+        SwitchOut: {
+            /** Changed At */
+            changed_at: string | null;
+            /** Changed By */
+            changed_by: string;
+            /** Halted */
+            halted: boolean;
+            /** Reason */
+            reason: string;
         };
         /** SystemOut */
         SystemOut: {
@@ -3247,6 +3347,58 @@ export interface operations {
             };
         };
     };
+    recommendations_api_halt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feed_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HaltIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedOut"];
+                };
+            };
+        };
+    };
+    recommendations_api_resume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feed_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResumeIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedOut"];
+                };
+            };
+        };
+    };
     recommendations_api_set_sizing: {
         parameters: {
             query?: never;
@@ -3269,6 +3421,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FeedOut"];
+                };
+            };
+        };
+    };
+    recommendations_api_get_switch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SwitchOut"];
+                };
+            };
+        };
+    };
+    recommendations_api_set_switch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SwitchIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SwitchOut"];
                 };
             };
         };

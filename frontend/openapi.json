@@ -1033,6 +1033,26 @@
             "title": "Equity",
             "type": "number"
           },
+          "halt_reason": {
+            "title": "Halt Reason",
+            "type": "string"
+          },
+          "halted": {
+            "title": "Halted",
+            "type": "boolean"
+          },
+          "halted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Halted At"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -1176,7 +1196,10 @@
           "min_lot",
           "lot_step",
           "risk_pct",
-          "lots_held"
+          "lots_held",
+          "halted",
+          "halt_reason",
+          "halted_at"
         ],
         "title": "FeedOut",
         "type": "object"
@@ -1280,6 +1303,19 @@
           "role"
         ],
         "title": "GrantOut",
+        "type": "object"
+      },
+      "HaltIn": {
+        "properties": {
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "HaltIn",
         "type": "object"
       },
       "JobIn": {
@@ -2316,6 +2352,24 @@
         "title": "RecommendationOut",
         "type": "object"
       },
+      "ResumeIn": {
+        "properties": {
+          "acknowledged": {
+            "title": "Acknowledged",
+            "type": "boolean"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "acknowledged"
+        ],
+        "title": "ResumeIn",
+        "type": "object"
+      },
       "RuleIn": {
         "properties": {
           "account_id": {
@@ -2683,6 +2737,60 @@
           "defaults"
         ],
         "title": "StrategyOut",
+        "type": "object"
+      },
+      "SwitchIn": {
+        "properties": {
+          "halted": {
+            "title": "Halted",
+            "type": "boolean"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "halted"
+        ],
+        "title": "SwitchIn",
+        "type": "object"
+      },
+      "SwitchOut": {
+        "properties": {
+          "changed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Changed At"
+          },
+          "changed_by": {
+            "title": "Changed By",
+            "type": "string"
+          },
+          "halted": {
+            "title": "Halted",
+            "type": "boolean"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "halted",
+          "reason",
+          "changed_at",
+          "changed_by"
+        ],
+        "title": "SwitchOut",
         "type": "object"
       },
       "SystemOut": {
@@ -5036,6 +5144,101 @@
         ]
       }
     },
+    "/api/recommendations/feeds/{feed_id}/halt": {
+      "post": {
+        "description": "Kill switch for one feed: no calls until resumed.",
+        "operationId": "recommendations_api_halt",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feed_id",
+            "required": true,
+            "schema": {
+              "title": "Feed Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HaltIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "Halt",
+        "tags": [
+          "recommendations"
+        ]
+      }
+    },
+    "/api/recommendations/feeds/{feed_id}/resume": {
+      "post": {
+        "operationId": "recommendations_api_resume",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feed_id",
+            "required": true,
+            "schema": {
+              "title": "Feed Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "Resume",
+        "tags": [
+          "recommendations"
+        ]
+      }
+    },
     "/api/recommendations/feeds/{feed_id}/sizing": {
       "post": {
         "description": "Lets alerts give exact MT5 lot sizes for this feed.",
@@ -5079,6 +5282,69 @@
           }
         ],
         "summary": "Set Sizing",
+        "tags": [
+          "recommendations"
+        ]
+      }
+    },
+    "/api/recommendations/switch": {
+      "get": {
+        "operationId": "recommendations_api_get_switch",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "Get Switch",
+        "tags": [
+          "recommendations"
+        ]
+      },
+      "post": {
+        "description": "Global kill switch: pause or resume every feed at once.",
+        "operationId": "recommendations_api_set_switch",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "Set Switch",
         "tags": [
           "recommendations"
         ]

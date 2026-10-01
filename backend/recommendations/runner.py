@@ -21,8 +21,9 @@ from bot.data.sentiment import fetch_fear_greed_index
 from bot.shadow.runner import drop_incomplete_bar
 from bot.strategy.registry import build_strategy
 from market.candles import candles_df, funding_df
+from market.health import check_series
 from recommendations.messages import describe
-from recommendations.models import Feed, Recommendation
+from recommendations.models import Feed, Recommendation, SignalSwitch
 from trading.engine.adapters import jsonable
 from trading.services.bots import strategy_config_with
 
@@ -201,7 +202,62 @@ def _alert(event: Recommendation) -> None:
     notify(AlertRule.Kind.RECOMMENDATION, title, body + " Advisory only; no order placed.")
 
 
+def _open_position_note(feed: Feed) -> str:
+    if feed.direction:
+        return (f"Your {feed.direction} {_pair(feed)} position stays as it is in MT5, with its Stop Loss at "
+                f"{_fmt(feed.stop)}; this app won't move or close it while paused.")
+    if feed.weight > 0:
+        lots = f"{feed.lots_held:g} lots" if feed.lots_held else f"{feed.weight:.0%} of capital"
+        return (f"Your {_pair(feed)} buys ({lots}) stay as they are in MT5; no resize or close alerts "
+                "will come while paused.")
+    return "You have no open position from this feed."
+
+
+def halt_feed(feed: Feed, reason: str, bar_time=None, price: float | None = None, by: str = "") -> Recommendation:
+    """Kill switch for one feed: records why signals stopped, alerts, and
+    makes no further calls until a person resumes it."""
+    now = timezone.now()
+    with transaction.atomic():
+        event = Recommendation.objects.create(
+            feed=feed, kind=Recommendation.Kind.SUPPRESSED, bar_time=bar_time or now, price=price,
+            reason=reason[:500], context={"by": by} if by else {},
+        )
+        feed.halted, feed.halt_reason, feed.halted_at = True, reason[:300], now
+        feed.status_reason = f"paused: {reason}"[:300]
+        feed.save(update_fields=["halted", "halt_reason", "halted_at", "status_reason"])
+    try:
+        notify(AlertRule.Kind.RECOMMENDATION, f"SIGNALS PAUSED: {feed.name} ({_pair(feed)} {feed.timeframe})",
+               f"Reason: {reason}.\n{_open_position_note(feed)}\n"
+               "No new alerts from this feed until you check and press Resume on the Recommendations page.")
+    except Exception:
+        logger.exception("pause alert for feed %s failed", feed.name)
+    return event
+
+
+def resume_feed(feed: Feed, by: str = "", note: str = "") -> Recommendation:
+    """Human acknowledgement that clears a halt. The next completed bar is
+    evaluated as usual; bars during the pause were not, so stops that
+    would have moved then move on the next bar."""
+    now = timezone.now()
+    with transaction.atomic():
+        event = Recommendation.objects.create(
+            feed=feed, kind=Recommendation.Kind.RESUMED, bar_time=now,
+            reason=f"resumed after: {feed.halt_reason}"[:500], context={"by": by, "note": note[:300]},
+        )
+        feed.halted, feed.halt_reason, feed.halted_at, feed.status_reason = False, "", None, ""
+        feed.save(update_fields=["halted", "halt_reason", "halted_at", "status_reason"])
+    return event
+
+
 def run_feed(feed: Feed, exchange_id: str, funding_config: dict) -> list[Recommendation]:
+    switch = SignalSwitch.get()
+    if switch.halted or feed.halted:
+        reason = (f"paused for all feeds: {switch.reason or 'kill switch'}" if switch.halted
+                  else f"paused: {feed.halt_reason or 'kill switch'}")[:300]
+        if feed.status_reason != reason:
+            feed.status_reason = reason
+            feed.save(update_fields=["status_reason"])
+        return []
     funding = None
     if feed.strategy == "funding_filtered":
         funding = funding_df(funding_config.get("exchange_id", "binanceusdm"),
@@ -215,10 +271,16 @@ def run_feed(feed: Feed, exchange_id: str, funding_config: dict) -> list[Recomme
         feed.save(update_fields=["status_reason"])
         return []
     bar_time = df.index[-1].to_pydatetime()
+    # before the same-bar check, so data that stops arriving is caught too
+    health = check_series(df, feed.timeframe)
+    if not health.ok:
+        return [halt_feed(feed, f"data check failed: {health.summary()}", bar_time, float(df["close"].iloc[-1]))]
     if feed.last_bar_at is not None and bar_time <= feed.last_bar_at:
         return []
 
     diagnosis = jsonable(strategy.diagnose(df))
+    if health.warnings:
+        diagnosis["data_warnings"] = health.warnings
     with transaction.atomic():
         if exposure:
             events = _evaluate_exposure(feed, strategy, df, bar_time)
