@@ -250,3 +250,30 @@ variants) before any result was seen.
   test results, so folds from 2024 on are not fully out of sample for the
   choice of strategy; the 2022-2023 folds and the holdout are the cleaner
   evidence.
+
+### Result (jobs #39–41): FAIL on the pre-registered bar
+
+| Run | OOS return | OOS Sharpe | Max DD | Positive folds | Deflated Sharpe prob. (trials) |
+|---|---|---|---|---|---|
+| donchian_ensemble BTC 4h | +54.7% | 0.84 | -14.7% | 4 / 9 | 0.22 (32) |
+| donchian_ensemble ETH 4h | +21.6% | 0.47 | -12.2% | 4 / 9 | 0.06 (33) |
+| donchian BTC 4h (reference) | +18.9% | 0.69 | -7.8% | 7 / 9 | 0.10 (45) |
+
+- BTC ensemble passes the Sharpe bar (0.84 >= 0.8) but fails the other
+  two: 4 of 9 folds positive (needs 5) and a deflated Sharpe probability
+  of 0.22 (needs 0.95). Bootstrap 5-95% Sharpe range -0.11 to 1.73;
+  bad-case drawdown -31%.
+- Its gains are concentrated in one regime: all of the profit came in
+  2023-H1 to 2024-H2 (four folds, +13% to +19% each, the long BTC uptrend).
+  It lost in both 2022 folds and in the last three (2025 to Feb 2026).
+- Plain donchian 4h is the opposite profile: smaller (+19%) but steadier,
+  7 of 9 folds positive, drawdown under 8%.
+- With ~30-45 variants on record per strategy, luck alone would produce an
+  annual Sharpe of about 1.2 for the best one on 4h data, so none of these
+  is statistically established. That's the honest state of the evidence,
+  not a bug in the test.
+- Conclusion left to the owner (hypotheses are concluded by a person). My
+  reading: hypothesis #1 failed. Keep following the ensemble on the Exness
+  demo only; don't fund real money on this evidence. A new idea (e.g. a
+  pre-registered donchian + ensemble blend, or a 2022-style bear filter)
+  needs its own hypothesis and budget.
