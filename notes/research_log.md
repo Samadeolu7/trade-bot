@@ -230,3 +230,23 @@ windows once survivorship is removed:
 Neither do strategy blends. The multi-coin versions reliably *lower
 drawdown*, but at a lower Sharpe in 2024–26, when altcoins were in a bear
 market relative to BTC. The BTC 4h ensemble stays the recommended strategy.
+
+## 2026-10-01 — Hypothesis #1: ensemble walk-forward stability (pre-registered)
+
+Registered in the app as hypothesis #1 (family trend/breakout, budget 6
+variants) before any result was seen.
+
+- Statement: the 9-lookback Donchian ensemble (fixed parameters from
+  Zarattini et al. 2025, bars_per_day 6) has an edge that is stable across
+  time, not concentrated in one period.
+- Test: anchored walk-forward, 6-month folds from 2022-01-01 to the holdout
+  start (2026-03-01, excluded), current backtest costs.
+- Runs: donchian_ensemble BTC/USDT 4h (the candidate), donchian_ensemble
+  ETH/USDT 4h (cross-check), donchian BTC/USDT 4h (reference).
+- Pass (BTC ensemble): joined out-of-sample Sharpe >= 0.8, deflated Sharpe
+  probability >= 0.95 counting every donchian_ensemble and trend/breakout
+  variant ever recorded, and at least half the folds positive.
+- Caveat stated up front: the ensemble was chosen after seeing 2024-2026
+  test results, so folds from 2024 on are not fully out of sample for the
+  choice of strategy; the 2022-2023 folds and the holdout are the cleaner
+  evidence.
