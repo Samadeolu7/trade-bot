@@ -211,7 +211,7 @@ def _downsample(curve: pd.Series) -> list[list[float]]:
 def _record(kind, strategy, symbol, timeframe, window_df, strategy_config, summary, key="", job=None) -> None:
     config_json = json.dumps(strategy_config, sort_keys=True, default=str)
     Experiment.objects.create(
-        run_key=key, job=job, git_commit=code_version(),
+        run_key=key, job=job, hypothesis_id=job.hypothesis_id if job else None, git_commit=code_version(),
         created_at=timezone.now(), kind=kind, strategy=strategy, strategy_label=strategy, symbol=symbol,
         timeframe=timeframe, window_start=str(window_df.index.min()), window_end=str(window_df.index.max()),
         touched_holdout=False, config=json.loads(config_json),

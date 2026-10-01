@@ -14,6 +14,7 @@ from research.keys import create_key, research_auth
 from research.legacy_reports import legacy_reports
 from research.models import (
     Experiment,
+    Hypothesis,
     ResearchApiKey,
     ResearchJob,
     ShadowRebalance,
@@ -125,9 +126,149 @@ def set_lifecycle(request, payload: LifecycleIn):
     return item
 
 
+class HypothesisIn(Schema):
+    title: str
+    statement: str
+    family: str
+    pass_criteria: dict = {}
+    trial_budget: int = 20
+
+
+class HypothesisOut(Schema):
+    id: int
+    title: str
+    statement: str
+    family: str
+    pass_criteria: dict
+    trial_budget: int
+    trials_used: int
+    status: str
+    conclusion: str
+    created_by: str
+    created_at: datetime
+    concluded_by: str
+    concluded_at: datetime | None
+
+
+def _hypothesis_out(h: Hypothesis) -> dict:
+    return {**{f: getattr(h, f) for f in (
+        "id", "title", "statement", "family", "pass_criteria", "trial_budget", "status", "conclusion",
+        "created_by", "created_at", "concluded_by", "concluded_at")}, "trials_used": h.trials_used()}
+
+
+def _actor(request) -> str:
+    key = getattr(request, "research_key", None)
+    return f"{request.user.username} via key {key.prefix}" if key else request.user.username
+
+
+@router.get("/hypotheses", response=list[HypothesisOut], auth=research_auth)
+def list_hypotheses(request, status: str | None = None, family: str | None = None):
+    rows = Hypothesis.objects.all()
+    if status:
+        rows = rows.filter(status=status)
+    if family:
+        rows = rows.filter(family=family)
+    return [_hypothesis_out(h) for h in rows[:500]]
+
+
+@router.post("/hypotheses", response=HypothesisOut, auth=research_auth)
+def create_hypothesis(request, payload: HypothesisIn):
+    """Pre-register an idea before running anything for it."""
+    if getattr(request, "research_key", None) is None:
+        if request.user.role == "viewer":
+            raise HttpError(403, "viewers can't register hypotheses")
+        require_verified(request)
+    title, statement, family = payload.title.strip(), payload.statement.strip(), payload.family.strip().lower()
+    if not title or not statement or not family:
+        raise HttpError(400, "a hypothesis needs a title, a statement of what should work and why, and a family")
+    if not 1 <= payload.trial_budget <= 100:
+        raise HttpError(400, "trial budget must be from 1 to 100 variants")
+    h = Hypothesis.objects.create(title=title[:120], statement=statement, family=family[:40],
+                                  pass_criteria=payload.pass_criteria, trial_budget=payload.trial_budget,
+                                  created_by=_actor(request))
+    audit("research.hypothesis", request=request, target=f"hypothesis:{h.pk}", title=h.title, family=h.family)
+    return _hypothesis_out(h)
+
+
+class ConcludeIn(Schema):
+    status: str  # passed | failed | abandoned
+    conclusion: str
+
+
+@router.post("/hypotheses/{hypothesis_id}/conclude", response=HypothesisOut)
+def conclude_hypothesis(request, hypothesis_id: int, payload: ConcludeIn):
+    """A person's verdict; research keys can't conclude."""
+    require_owner(request)
+    h = Hypothesis.objects.filter(pk=hypothesis_id).first()
+    if h is None:
+        raise HttpError(404, "no such hypothesis")
+    if payload.status not in ("passed", "failed", "abandoned"):
+        raise HttpError(400, "status must be passed, failed or abandoned")
+    if not payload.conclusion.strip():
+        raise HttpError(400, "write what the evidence showed")
+    h.status, h.conclusion = payload.status, payload.conclusion.strip()
+    h.concluded_by, h.concluded_at = request.user.username, timezone.now()
+    h.save(update_fields=["status", "conclusion", "concluded_by", "concluded_at"])
+    audit("research.conclude", request=request, target=f"hypothesis:{h.pk}", status=h.status)
+    return _hypothesis_out(h)
+
+
+class BudgetIn(Schema):
+    trial_budget: int
+
+
+@router.post("/hypotheses/{hypothesis_id}/budget", response=HypothesisOut)
+def set_budget(request, hypothesis_id: int, payload: BudgetIn):
+    require_owner(request)
+    h = Hypothesis.objects.filter(pk=hypothesis_id).first()
+    if h is None:
+        raise HttpError(404, "no such hypothesis")
+    if not 1 <= payload.trial_budget <= 500:
+        raise HttpError(400, "trial budget must be from 1 to 500")
+    old = h.trial_budget
+    h.trial_budget = payload.trial_budget
+    h.save(update_fields=["trial_budget"])
+    audit("research.budget", request=request, target=f"hypothesis:{h.pk}", old=old, new=h.trial_budget)
+    return _hypothesis_out(h)
+
+
+def _hypothesis_for_job(request, hypothesis_id: int | None, variants: int) -> Hypothesis | None:
+    """Jobs started with a research key must belong to an open hypothesis,
+    and no hypothesis may run more variants than its budget."""
+    if hypothesis_id is None:
+        if getattr(request, "research_key", None) is not None:
+            raise HttpError(400, "jobs started with a research key need a hypothesis_id: register the idea first "
+                                 "(POST /api/research/hypotheses)")
+        return None
+    h = Hypothesis.objects.filter(pk=hypothesis_id).first()
+    if h is None:
+        raise HttpError(404, "no such hypothesis")
+    if h.status != Hypothesis.Status.OPEN:
+        raise HttpError(400, f"hypothesis #{h.pk} is {h.status}; register a new one for a new idea")
+    pending = sum(_variant_count(j) for j in h.jobs.filter(
+        status__in=[ResearchJob.Status.QUEUED, ResearchJob.Status.RUNNING]))
+    used = h.trials_used() + pending
+    if used + variants > h.trial_budget:
+        raise HttpError(409, f"hypothesis #{h.pk} has used {used} of its {h.trial_budget} trials; this job adds "
+                             f"{variants}. Each variant tried makes a lucky result more likely, so the budget is "
+                             "fixed; the owner can raise it with a reason.")
+    return h
+
+
+def _variant_count(job_or_params) -> int:
+    params = job_or_params.params if hasattr(job_or_params, "params") else job_or_params
+    if "sizes" in params:
+        return len(params["sizes"])
+    count = 1
+    for values in (params.get("params") or {}).values():
+        count *= len(values) if isinstance(values, list) else 1
+    return count
+
+
 class JobOut(Schema):
     id: int
     kind: str
+    hypothesis_id: int | None
     params: dict
     status: str
     result: dict
@@ -144,6 +285,8 @@ class JobIn(Schema):
     baseline: str = "donchian"
     # "section.key" -> list of values; every combination is run
     params: dict[str, list] = {}
+    # the pre-registered idea this tests (required with a research key)
+    hypothesis_id: int | None = None
 
 
 @router.get("/jobs", response=list[JobOut], auth=research_auth)
@@ -175,7 +318,9 @@ def create_job(request, payload: JobIn):
         raise HttpError(409, str(exc)) from exc
     except JobError as exc:
         raise HttpError(400, str(exc)) from exc
-    job = ResearchJob.objects.create(kind=ResearchJob.Kind.RESEARCH_REPORT, params=params, created_by=request.user)
+    hypothesis = _hypothesis_for_job(request, payload.hypothesis_id, _variant_count(params))
+    job = ResearchJob.objects.create(kind=ResearchJob.Kind.RESEARCH_REPORT, params=params, created_by=request.user,
+                                     hypothesis=hypothesis)
     if key is not None:
         ResearchApiKey.objects.filter(pk=key.pk).update(jobs_started=F("jobs_started") + 1)
     audit("research.job", request=request, target=f"job:{job.pk}", params=params,
@@ -193,6 +338,7 @@ class WalkForwardJobIn(Schema):
     # first out-of-sample window start; folds then step by test_months up to the holdout
     first_test: str = "2022-01-01"
     test_months: int = 6
+    hypothesis_id: int | None = None
 
 
 @router.post("/walk-forward-jobs", response=JobOut, auth=research_auth)
@@ -215,7 +361,9 @@ def create_walk_forward_job(request, payload: WalkForwardJobIn):
         raise HttpError(409, str(exc)) from exc
     except JobError as exc:
         raise HttpError(400, str(exc)) from exc
-    job = ResearchJob.objects.create(kind=ResearchJob.Kind.WALK_FORWARD, params=params, created_by=request.user)
+    hypothesis = _hypothesis_for_job(request, payload.hypothesis_id, _variant_count(params))
+    job = ResearchJob.objects.create(kind=ResearchJob.Kind.WALK_FORWARD, params=params, created_by=request.user,
+                                     hypothesis=hypothesis)
     if key is not None:
         ResearchApiKey.objects.filter(pk=key.pk).update(jobs_started=F("jobs_started") + 1)
     audit("research.job", request=request, target=f"job:{job.pk}", params=params,
@@ -231,6 +379,7 @@ class PortfolioJobIn(Schema):
     sizes: list[int] = [10]
     # single-value donchian_ensemble.* overrides
     params: dict = {}
+    hypothesis_id: int | None = None
 
 
 @router.post("/portfolio-jobs", response=JobOut, auth=research_auth)
@@ -258,7 +407,9 @@ def create_portfolio_job(request, payload: PortfolioJobIn):
                                       status=ResearchJob.Status.DONE).order_by("-created_at").first()
     if done and (done.result.get("header") or {}).get("code") == _code_version():
         raise HttpError(409, f"Already run with exactly these settings on the current code (job #{done.pk}).")
-    job = ResearchJob.objects.create(kind=ResearchJob.Kind.PORTFOLIO_REPORT, params=params, created_by=request.user)
+    hypothesis = _hypothesis_for_job(request, payload.hypothesis_id, _variant_count(params))
+    job = ResearchJob.objects.create(kind=ResearchJob.Kind.PORTFOLIO_REPORT, params=params, created_by=request.user,
+                                     hypothesis=hypothesis)
     if key is not None:
         ResearchApiKey.objects.filter(pk=key.pk).update(jobs_started=F("jobs_started") + 1)
     audit("research.job", request=request, target=f"job:{job.pk}", params=params,

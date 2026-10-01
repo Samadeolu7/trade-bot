@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { client, unwrap } from '../api/client'
+import { hypothesesKey, useHypotheses } from './Hypotheses'
 import { keys, type Strategy } from '../api/hooks'
 import { Button, ErrorText, Field, Panel, inputClass } from './ui'
 
@@ -138,6 +139,8 @@ export default function ReportForm({ initial }: { initial: ReportDraft }) {
     set({ rows: merged })
   }
 
+  const { data: hypotheses } = useHypotheses()
+  const [hypothesisId, setHypothesisId] = useState('')
   const submit = async (walkForward = false) => {
     setError(null)
     try {
@@ -148,7 +151,13 @@ export default function ReportForm({ initial }: { initial: ReportDraft }) {
         if (!values.length) throw new Error(`give ${row.path} at least one value, or remove it`)
         params[row.path] = values.map((v) => coerce(v, fallback))
       }
-      const common = { strategy: draft.strategy, symbol: 'BTC/USDT', timeframe: draft.timeframe, params }
+      const common = {
+        strategy: draft.strategy,
+        symbol: 'BTC/USDT',
+        timeframe: draft.timeframe,
+        params,
+        hypothesis_id: hypothesisId ? Number(hypothesisId) : null,
+      }
       await unwrap(
         walkForward
           ? client.POST('/api/research/walk-forward-jobs', {
@@ -158,6 +167,7 @@ export default function ReportForm({ initial }: { initial: ReportDraft }) {
       )
       setQueued(true)
       qc.invalidateQueries({ queryKey: keys.jobs })
+      qc.invalidateQueries({ queryKey: hypothesesKey })
     } catch (err) {
       setError(err)
     }
@@ -255,6 +265,20 @@ export default function ReportForm({ initial }: { initial: ReportDraft }) {
       <p className="mt-3 text-[12px] text-muted">
         Runs on the train (2020–2023) and test (2024 to the holdout) windows; the holdout window is never used here.
       </p>
+      <div className="mt-3 max-w-md">
+        <Field label="Hypothesis" hint="The registered idea this tests; its variant budget and family count apply.">
+          <select className={inputClass} value={hypothesisId} onChange={(e) => setHypothesisId(e.target.value)}>
+            <option value="">None (exploratory)</option>
+            {hypotheses
+              ?.filter((h) => h.status === 'open')
+              .map((h) => (
+                <option key={h.id} value={h.id}>
+                  #{h.id} {h.title} ({h.trials_used}/{h.trial_budget})
+                </option>
+              ))}
+          </select>
+        </Field>
+      </div>
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <Button variant="primary" onClick={() => submit()} disabled={variants > MAX_VARIANTS}>
           Run report

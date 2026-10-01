@@ -8,6 +8,7 @@ import json
 import math
 
 import pandas as pd
+from django.db.models import Q
 from django.utils import timezone
 
 from bot.backtest.metrics import periods_per_year
@@ -64,13 +65,16 @@ def check_not_repeat_walk_forward(params: dict) -> None:
         raise RepeatJobError(f"Already run with exactly these settings on the current code (job #{job}).")
 
 
-def _trials(strategy: str, own_keys: list[str], own_sharpes: list[float], ppy: float) -> tuple[int, float, str]:
+def _trials(strategy: str, own_keys: list[str], own_sharpes: list[float], ppy: float,
+            family: str = "") -> tuple[int, float, str]:
     """(number of trials, variance of their per-bar Sharpe, where the
     variance came from). Trials = every distinct run of this strategy ever
-    recorded, any market or timeframe, plus this job's variants."""
+    recorded, any market or timeframe, plus every run in the job's
+    hypothesis family, plus this job's variants."""
     keys = set(own_keys)
     stored = []
-    for key, kind, start, result in Experiment.objects.filter(strategy=strategy).exclude(run_key="").values_list(
+    scope = Q(strategy=strategy) | (Q(hypothesis__family=family) if family else Q(pk__in=[]))
+    for key, kind, start, result in Experiment.objects.filter(scope).exclude(run_key="").values_list(
             "run_key", "kind", "window_start", "result"):
         keys.add(key)
         if kind == "research_report" and start[:10] >= "2024-01-01" and result.get("sharpe_ratio") is not None:
@@ -125,7 +129,8 @@ def run_walk_forward_report(params: dict, fetch: bool = True, job: ResearchJob |
         key, cfg = keys[label]
         daily = daily_returns(r)
         Experiment.objects.create(
-            run_key=key, job=job, git_commit=code_version(), created_at=timezone.now(),
+            run_key=key, job=job, hypothesis_id=job.hypothesis_id if job else None, git_commit=code_version(),
+            created_at=timezone.now(),
             kind=KIND, strategy=strategy, strategy_label=label, symbol=symbol, timeframe=timeframe,
             window_start=str(first_test), window_end=str(end), touched_holdout=False,
             config=json.loads(json.dumps(cfg, default=str)), config_hash=key[:12],
@@ -137,7 +142,8 @@ def run_walk_forward_report(params: dict, fetch: bool = True, job: ResearchJob |
             returns=[[int(ts.timestamp()), round(float(v), 6)] for ts, v in daily.items()],
         )
 
-    n_trials, variance, source = _trials(strategy, [k for k, _ in keys.values()], own_sharpes, ppy)
+    family = job.hypothesis.family if job and job.hypothesis_id else ""
+    n_trials, variance, source = _trials(strategy, [k for k, _ in keys.values()], own_sharpes, ppy, family)
     dsr = deflated_sharpe(oos, n_trials, variance)
     block = max(1, int(BOOTSTRAP_DAYS * ppy / 365))
     boot = block_bootstrap(oos, block, ppy)

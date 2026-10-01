@@ -672,6 +672,19 @@
         "title": "BotStatusIn",
         "type": "object"
       },
+      "BudgetIn": {
+        "properties": {
+          "trial_budget": {
+            "title": "Trial Budget",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "trial_budget"
+        ],
+        "title": "BudgetIn",
+        "type": "object"
+      },
       "CandleOut": {
         "properties": {
           "close": {
@@ -708,6 +721,24 @@
           "volume"
         ],
         "title": "CandleOut",
+        "type": "object"
+      },
+      "ConcludeIn": {
+        "properties": {
+          "conclusion": {
+            "title": "Conclusion",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "conclusion"
+        ],
+        "title": "ConcludeIn",
         "type": "object"
       },
       "DecisionIn": {
@@ -1420,12 +1451,140 @@
         "title": "HaltIn",
         "type": "object"
       },
+      "HypothesisIn": {
+        "properties": {
+          "family": {
+            "title": "Family",
+            "type": "string"
+          },
+          "pass_criteria": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Pass Criteria",
+            "type": "object"
+          },
+          "statement": {
+            "title": "Statement",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "trial_budget": {
+            "default": 20,
+            "title": "Trial Budget",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "title",
+          "statement",
+          "family"
+        ],
+        "title": "HypothesisIn",
+        "type": "object"
+      },
+      "HypothesisOut": {
+        "properties": {
+          "concluded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concluded At"
+          },
+          "concluded_by": {
+            "title": "Concluded By",
+            "type": "string"
+          },
+          "conclusion": {
+            "title": "Conclusion",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "family": {
+            "title": "Family",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "pass_criteria": {
+            "additionalProperties": true,
+            "title": "Pass Criteria",
+            "type": "object"
+          },
+          "statement": {
+            "title": "Statement",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "trial_budget": {
+            "title": "Trial Budget",
+            "type": "integer"
+          },
+          "trials_used": {
+            "title": "Trials Used",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "statement",
+          "family",
+          "pass_criteria",
+          "trial_budget",
+          "trials_used",
+          "status",
+          "conclusion",
+          "created_by",
+          "created_at",
+          "concluded_by",
+          "concluded_at"
+        ],
+        "title": "HypothesisOut",
+        "type": "object"
+      },
       "JobIn": {
         "properties": {
           "baseline": {
             "default": "donchian",
             "title": "Baseline",
             "type": "string"
+          },
+          "hypothesis_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hypothesis Id"
           },
           "params": {
             "additionalProperties": {
@@ -1480,6 +1639,17 @@
             ],
             "title": "Finished At"
           },
+          "hypothesis_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hypothesis Id"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -1518,6 +1688,7 @@
         "required": [
           "id",
           "kind",
+          "hypothesis_id",
           "params",
           "status",
           "result",
@@ -2047,6 +2218,17 @@
       },
       "PortfolioJobIn": {
         "properties": {
+          "hypothesis_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hypothesis Id"
+          },
           "params": {
             "additionalProperties": true,
             "default": {},
@@ -3310,6 +3492,17 @@
             "default": "2022-01-01",
             "title": "First Test",
             "type": "string"
+          },
+          "hypothesis_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hypothesis Id"
           },
           "params": {
             "additionalProperties": {
@@ -5737,6 +5930,207 @@
           }
         ],
         "summary": "Decide",
+        "tags": [
+          "research"
+        ]
+      }
+    },
+    "/api/research/hypotheses": {
+      "get": {
+        "operationId": "research_api_list_hypotheses",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "family",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Family"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HypothesisOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "ResearchKeyAuth": []
+          },
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "List Hypotheses",
+        "tags": [
+          "research"
+        ]
+      },
+      "post": {
+        "description": "Pre-register an idea before running anything for it.",
+        "operationId": "research_api_create_hypothesis",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HypothesisIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HypothesisOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "ResearchKeyAuth": []
+          },
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "Create Hypothesis",
+        "tags": [
+          "research"
+        ]
+      }
+    },
+    "/api/research/hypotheses/{hypothesis_id}/budget": {
+      "post": {
+        "operationId": "research_api_set_budget",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "hypothesis_id",
+            "required": true,
+            "schema": {
+              "title": "Hypothesis Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BudgetIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HypothesisOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "Set Budget",
+        "tags": [
+          "research"
+        ]
+      }
+    },
+    "/api/research/hypotheses/{hypothesis_id}/conclude": {
+      "post": {
+        "description": "A person's verdict; research keys can't conclude.",
+        "operationId": "research_api_conclude_hypothesis",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "hypothesis_id",
+            "required": true,
+            "schema": {
+              "title": "Hypothesis Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConcludeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HypothesisOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "Conclude Hypothesis",
         "tags": [
           "research"
         ]

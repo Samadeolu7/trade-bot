@@ -6,6 +6,41 @@ from bot.research.lifecycle import STAGES
 STAGE_CHOICES = [(s, s.replace("_", " ")) for s in STAGES]
 
 
+class Hypothesis(models.Model):
+    """A pre-registered research idea: what should work and why, how it
+    will be judged, and how many variants it may try. Every experiment run
+    for it counts against its budget and towards its family's trial count
+    (the deflated Sharpe's n), and failed ones stay listed so they aren't
+    quietly retried."""
+
+    class Status(models.TextChoices):
+        OPEN = "open", "Open"
+        PASSED = "passed", "Passed"
+        FAILED = "failed", "Failed"
+        ABANDONED = "abandoned", "Abandoned"
+
+    title = models.CharField(max_length=120)
+    statement = models.TextField()
+    # e.g. "trend/breakout", "mean reversion", "carry"
+    family = models.CharField(max_length=40, db_index=True)
+    # how it will be judged, fixed before any result: e.g.
+    # {"test_sharpe_min": 0.9, "deflated_sharpe_min": 0.95}
+    pass_criteria = models.JSONField(default=dict)
+    trial_budget = models.PositiveIntegerField(default=20)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.OPEN, db_index=True)
+    conclusion = models.TextField(blank=True)
+    created_by = models.CharField(max_length=150, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    concluded_by = models.CharField(max_length=150, blank=True)
+    concluded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def trials_used(self) -> int:
+        return self.experiments.exclude(run_key="").values("run_key").distinct().count()
+
+
 class Experiment(models.Model):
     """Every backtest, sweep combination and research-report window ever
     run (spec Section 8), including rejected ideas. Rows are never deleted,
@@ -38,6 +73,8 @@ class Experiment(models.Model):
     # daily returns of the whole run as [[unix day, return], ...] (walk-forward
     # runs), kept so overfitting tests across a family's variants are possible
     returns = models.JSONField(null=True, blank=True)
+    hypothesis = models.ForeignKey(Hypothesis, null=True, blank=True, on_delete=models.SET_NULL,
+                                   related_name="experiments")
 
     class Meta:
         ordering = ["-created_at"]
@@ -83,6 +120,7 @@ class ResearchJob(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+    hypothesis = models.ForeignKey(Hypothesis, null=True, blank=True, on_delete=models.SET_NULL, related_name="jobs")
 
     class Meta:
         ordering = ["-created_at"]

@@ -836,6 +836,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/research/hypotheses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Hypotheses */
+        get: operations["research_api_list_hypotheses"];
+        put?: never;
+        /**
+         * Create Hypothesis
+         * @description Pre-register an idea before running anything for it.
+         */
+        post: operations["research_api_create_hypothesis"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/research/hypotheses/{hypothesis_id}/budget": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Budget */
+        post: operations["research_api_set_budget"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/research/hypotheses/{hypothesis_id}/conclude": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Conclude Hypothesis
+         * @description A person's verdict; research keys can't conclude.
+         */
+        post: operations["research_api_conclude_hypothesis"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/research/jobs": {
         parameters: {
             query?: never;
@@ -1393,6 +1451,11 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** BudgetIn */
+        BudgetIn: {
+            /** Trial Budget */
+            trial_budget: number;
+        };
         /** CandleOut */
         CandleOut: {
             /** Close */
@@ -1407,6 +1470,13 @@ export interface components {
             time: number;
             /** Volume */
             volume: number;
+        };
+        /** ConcludeIn */
+        ConcludeIn: {
+            /** Conclusion */
+            conclusion: string;
+            /** Status */
+            status: string;
         };
         /** DecisionIn */
         DecisionIn: {
@@ -1649,6 +1719,61 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** HypothesisIn */
+        HypothesisIn: {
+            /** Family */
+            family: string;
+            /**
+             * Pass Criteria
+             * @default {}
+             */
+            pass_criteria: {
+                [key: string]: unknown;
+            };
+            /** Statement */
+            statement: string;
+            /** Title */
+            title: string;
+            /**
+             * Trial Budget
+             * @default 20
+             */
+            trial_budget: number;
+        };
+        /** HypothesisOut */
+        HypothesisOut: {
+            /** Concluded At */
+            concluded_at: string | null;
+            /** Concluded By */
+            concluded_by: string;
+            /** Conclusion */
+            conclusion: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /** Family */
+            family: string;
+            /** Id */
+            id: number;
+            /** Pass Criteria */
+            pass_criteria: {
+                [key: string]: unknown;
+            };
+            /** Statement */
+            statement: string;
+            /** Status */
+            status: string;
+            /** Title */
+            title: string;
+            /** Trial Budget */
+            trial_budget: number;
+            /** Trials Used */
+            trials_used: number;
+        };
         /** JobIn */
         JobIn: {
             /**
@@ -1656,6 +1781,8 @@ export interface components {
              * @default donchian
              */
             baseline: string;
+            /** Hypothesis Id */
+            hypothesis_id?: number | null;
             /**
              * Params
              * @default {}
@@ -1687,6 +1814,8 @@ export interface components {
             error: string;
             /** Finished At */
             finished_at: string | null;
+            /** Hypothesis Id */
+            hypothesis_id: number | null;
             /** Id */
             id: number;
             /** Kind */
@@ -1894,6 +2023,8 @@ export interface components {
         };
         /** PortfolioJobIn */
         PortfolioJobIn: {
+            /** Hypothesis Id */
+            hypothesis_id?: number | null;
             /**
              * Params
              * @default {}
@@ -2389,6 +2520,8 @@ export interface components {
              * @default 2022-01-01
              */
             first_test: string;
+            /** Hypothesis Id */
+            hypothesis_id?: number | null;
             /**
              * Params
              * @default {}
@@ -3659,6 +3792,105 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExperimentOut"];
+                };
+            };
+        };
+    };
+    research_api_list_hypotheses: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                family?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HypothesisOut"][];
+                };
+            };
+        };
+    };
+    research_api_create_hypothesis: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HypothesisIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HypothesisOut"];
+                };
+            };
+        };
+    };
+    research_api_set_budget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                hypothesis_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BudgetIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HypothesisOut"];
+                };
+            };
+        };
+    };
+    research_api_conclude_hypothesis: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                hypothesis_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConcludeIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HypothesisOut"];
                 };
             };
         };

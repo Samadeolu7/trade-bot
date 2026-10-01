@@ -11,6 +11,17 @@ from research.models import ResearchApiKey, ResearchJob
 JOB = {"strategy": "donchian", "timeframe": "4h", "params": {"pyramid.max_adds": [3]}}
 
 
+@pytest.fixture(autouse=True)
+def hypothesis(db):
+    from research.models import Hypothesis
+
+    h = Hypothesis.objects.create(title="pyramiding", statement="adding to winners helps breakouts",
+                                  family="trend/breakout")
+    JOB["hypothesis_id"] = h.pk
+    yield h
+    JOB.pop("hypothesis_id", None)
+
+
 def bearer(key):
     return {"HTTP_AUTHORIZATION": f"Bearer {key}"}
 
@@ -90,3 +101,36 @@ def test_owner_creates_lists_and_revokes_keys_in_the_app(owner, django_user_mode
     other = Client()
     other.force_login(trader)
     assert post(other, "/api/research/keys", {"name": "x"}).status_code == 403
+
+
+def test_key_jobs_need_an_open_hypothesis_within_budget(key, hypothesis, owner):
+    from research.models import Experiment
+
+    client = Client()
+    no_h = {k: v for k, v in JOB.items() if k != "hypothesis_id"}
+    r = post(client, "/api/research/jobs", no_h, **bearer(key))
+    assert r.status_code == 400 and "hypothesis_id" in r.json()["detail"]
+
+    hypothesis.trial_budget = 3
+    hypothesis.save()
+    for n, run_key in enumerate(["a", "b"]):
+        Experiment.objects.create(created_at=hypothesis.created_at, kind="research_report", strategy="donchian",
+                                  strategy_label="x", symbol="BTC/USDT", timeframe="4h", config_hash="x",
+                                  run_key=run_key, hypothesis=hypothesis)
+    two = {**JOB, "params": {"pyramid.max_adds": [3, 4]}}
+    r = post(client, "/api/research/jobs", two, **bearer(key))
+    assert r.status_code == 409 and "used 2 of its 3 trials" in r.json()["detail"]
+    assert post(client, "/api/research/jobs", JOB, **bearer(key)).status_code == 200
+
+    # keys can register ideas but only a person concludes them
+    r = post(client, "/api/research/hypotheses",
+             {"title": "carry", "statement": "funding predicts returns", "family": "Carry"}, **bearer(key))
+    assert r.status_code == 200 and r.json()["family"] == "carry" and r.json()["created_by"].endswith(key[3:11])
+    hid = r.json()["id"]
+    assert post(client, f"/api/research/hypotheses/{hid}/conclude",
+                {"status": "failed", "conclusion": "no edge"}, **bearer(key)).status_code in (401, 403)
+    client.force_login(owner)
+    r = post(client, f"/api/research/hypotheses/{hid}/conclude", {"status": "failed", "conclusion": "no edge"})
+    assert r.status_code == 200 and r.json()["status"] == "failed"
+    r = post(client, "/api/research/jobs", {**JOB, "params": {"pyramid.max_adds": [6]}, "hypothesis_id": hid})
+    assert r.status_code == 400 and "is failed" in r.json()["detail"]

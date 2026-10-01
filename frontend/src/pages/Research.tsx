@@ -3,6 +3,7 @@ import { useState, type ReactNode } from 'react'
 import { client, unwrap } from '../api/client'
 import { keys, useExperiments, useJobs, useLifecycle, useMe } from '../api/hooks'
 import ReportForm, { draftFromJob, loadDraft, type ReportDraft } from '../components/ReportForm'
+import Hypotheses from '../components/Hypotheses'
 import ShadowHistory from '../components/ShadowHistory'
 import { EquityChart } from '../components/charts'
 import { Button, Empty, ErrorText, Panel, Status, Tabs, inputClass } from '../components/ui'
@@ -441,7 +442,7 @@ function Lifecycle({ owner }: { owner: boolean }) {
 
 export default function Research() {
   const { data: me } = useMe()
-  const [tab, setTab] = useState<'reports' | 'experiments' | 'stages' | 'shadow'>('reports')
+  const [tab, setTab] = useState<'reports' | 'hypotheses' | 'experiments' | 'stages' | 'shadow'>('reports')
   const owner = me?.role === 'owner'
   // "Run again" refills the form; the key remounts it with the new settings
   const [draft, setDraft] = useState<ReportDraft>(loadDraft)
@@ -460,6 +461,7 @@ export default function Research() {
           onChange={setTab}
           options={[
             { value: 'reports', label: 'Reports' },
+            { value: 'hypotheses', label: 'Hypotheses' },
             { value: 'experiments', label: 'Experiment log' },
             { value: 'stages', label: 'Strategy stages' },
             { value: 'shadow', label: 'Shadow runs' },
@@ -473,6 +475,7 @@ export default function Research() {
           <LegacyReports />
         </>
       )}
+      {tab === 'hypotheses' && <Hypotheses owner={owner} canCreate={me?.role !== 'viewer'} />}
       {tab === 'experiments' && <Experiments owner={owner} />}
       {tab === 'stages' && <Lifecycle owner={owner} />}
       {tab === 'shadow' && (
