@@ -315,6 +315,10 @@ def run_job(job: ResearchJob, fetch: bool = True) -> ResearchJob:
             from research.portfolio_jobs import run_portfolio_report, validate_portfolio_params
 
             job.result = run_portfolio_report(validate_portfolio_params(job.params), fetch=fetch, job=job)
+        elif job.kind == ResearchJob.Kind.WALK_FORWARD:
+            from research.walkforward_jobs import run_walk_forward_report, validate_walk_forward_params
+
+            job.result = run_walk_forward_report(validate_walk_forward_params(job.params), fetch=fetch, job=job)
         else:
             job.result = run_research_report(validate_params(job.kind, job.params), fetch=fetch, job=job)
         job.status = ResearchJob.Status.DONE

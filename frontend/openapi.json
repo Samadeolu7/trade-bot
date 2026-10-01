@@ -3303,6 +3303,48 @@
         ],
         "title": "VenueOut",
         "type": "object"
+      },
+      "WalkForwardJobIn": {
+        "properties": {
+          "first_test": {
+            "default": "2022-01-01",
+            "title": "First Test",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": {
+              "items": {},
+              "type": "array"
+            },
+            "default": {},
+            "title": "Params",
+            "type": "object"
+          },
+          "strategy": {
+            "title": "Strategy",
+            "type": "string"
+          },
+          "symbol": {
+            "default": "BTC/USDT",
+            "title": "Symbol",
+            "type": "string"
+          },
+          "test_months": {
+            "default": 6,
+            "title": "Test Months",
+            "type": "integer"
+          },
+          "timeframe": {
+            "default": "4h",
+            "title": "Timeframe",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategy"
+        ],
+        "title": "WalkForwardJobIn",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -6104,6 +6146,47 @@
           }
         ],
         "summary": "Shadow History",
+        "tags": [
+          "research"
+        ]
+      }
+    },
+    "/api/research/walk-forward-jobs": {
+      "post": {
+        "description": "Anchored walk-forward validation with a deflated Sharpe ratio and a\nbootstrap range (holdout excluded).",
+        "operationId": "research_api_create_walk_forward_job",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WalkForwardJobIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "ResearchKeyAuth": []
+          },
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "Create Walk Forward Job",
         "tags": [
           "research"
         ]

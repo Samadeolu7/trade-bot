@@ -73,6 +73,100 @@ function RunTable({ runs }: { runs: Run[] }) {
   )
 }
 
+type WalkForward = {
+  header: Record<string, string | number>
+  folds: {
+    fold: number
+    test: string
+    chosen: string
+    train_sharpe: number
+    test_stats: { total_return_pct: number; sharpe_ratio: number; max_drawdown_pct: number; trades?: number }
+  }[]
+  oos: { total_return_pct: number; sharpe_ratio: number; max_drawdown_pct: number; positive_folds: number; folds: number }
+  deflated_sharpe: { probability: number; n_trials: number; variance_source: string; pass: boolean }
+  bootstrap: { sharpe_p05?: number; sharpe_p95?: number; max_drawdown_p05?: number }
+  equity: [number, number][]
+}
+
+function WalkForwardResult({ result }: { result: WalkForward }) {
+  const { oos, deflated_sharpe: dsr, bootstrap: boot } = result
+  const several = Number(result.header.variants) > 1
+  return (
+    <div className="space-y-3 pb-3">
+      <p className="px-4 pt-3 text-[12px] text-muted">
+        {result.header.folds}. Holdout {result.header.holdout}. Costs {result.header.costs}.
+      </p>
+      <div className="grid gap-3 px-4 text-[13px] md:grid-cols-3">
+        <div>
+          <div className="text-ink-2">Out of sample, all folds</div>
+          <div className="font-semibold">
+            {n(oos.total_return_pct, '%')} · Sharpe {oos.sharpe_ratio} · drawdown {oos.max_drawdown_pct}%
+          </div>
+          <div className="text-ink-2">
+            {oos.positive_folds} of {oos.folds} folds positive
+          </div>
+        </div>
+        <div>
+          <div className="text-ink-2">Deflated Sharpe (chance it's real)</div>
+          <div className={`font-semibold ${dsr.pass ? 'text-up' : 'text-down'}`}>
+            {(dsr.probability * 100).toFixed(0)}% {dsr.pass ? '(passes 95%)' : '(below 95%)'}
+          </div>
+          <div className="text-ink-2" title={dsr.variance_source}>
+            counting {dsr.n_trials} variants ever tried
+          </div>
+        </div>
+        {boot.sharpe_p05 != null && (
+          <div>
+            <div className="text-ink-2">Bootstrap range (5–95%)</div>
+            <div className="font-semibold">
+              Sharpe {boot.sharpe_p05} to {boot.sharpe_p95}
+            </div>
+            <div className="text-ink-2">bad-case drawdown {((boot.max_drawdown_p05 ?? 0) * 100).toFixed(1)}%</div>
+          </div>
+        )}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="data">
+          <thead>
+            <tr>
+              <th>Fold</th>
+              <th>Test window</th>
+              {several && <th>Variant used</th>}
+              <th className="r">Return</th>
+              <th className="r">Max drawdown</th>
+              <th className="r">Sharpe</th>
+              <th className="r">Trades</th>
+            </tr>
+          </thead>
+          <tbody>
+            {result.folds.map((f) => (
+              <tr key={f.fold}>
+                <td>{f.fold}</td>
+                <td className="num">{f.test}</td>
+                {several && <td title={`train Sharpe ${f.train_sharpe}`}>{f.chosen}</td>}
+                <td className="num r">{n(f.test_stats.total_return_pct, '%')}</td>
+                <td className="num r">{n(f.test_stats.max_drawdown_pct, '%')}</td>
+                <td className="num r">{n(f.test_stats.sharpe_ratio)}</td>
+                <td className="num r">{n(f.test_stats.trades)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {result.equity.length > 0 && (
+        <div className="px-4">
+          <div className="mb-1 text-[13px] text-ink-2">Out-of-sample equity, folds joined</div>
+          <EquityChart
+            height={160}
+            baseline={result.equity[0][1]}
+            points={result.equity.map(([time, equity]) => ({ time, equity }))}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ReportPanel({
   title,
   subtitle,
@@ -135,7 +229,9 @@ function Jobs({ onRunAgain }: { onRunAgain?: (draft: ReportDraft) => void }) {
           <ReportPanel
             key={job.id}
             title={`${params.strategy} on ${params.timeframe}`}
-            subtitle={Object.keys(params.params ?? {}).join(', ')}
+            subtitle={[job.kind === 'walk_forward' ? 'walk-forward' : '', ...Object.keys(params.params ?? {})]
+              .filter(Boolean)
+              .join(', ')}
             when={job.created_at}
             status={job.status}
             defaultOpen={index === 0}
@@ -147,7 +243,10 @@ function Jobs({ onRunAgain }: { onRunAgain?: (draft: ReportDraft) => void }) {
                 {job.status === 'queued' ? 'Waiting for the research worker.' : 'Running; this can take a few minutes.'}
               </p>
             )}
-            {job.status === 'done' && (
+            {job.status === 'done' && job.kind === 'walk_forward' && (
+              <WalkForwardResult result={job.result as unknown as WalkForward} />
+            )}
+            {job.status === 'done' && job.kind !== 'walk_forward' && (
               <div className="space-y-3 pb-3">
                 {header && (
                   <p className="px-4 pt-3 text-[12px] text-muted">

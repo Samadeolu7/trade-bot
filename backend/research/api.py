@@ -51,7 +51,7 @@ class ExperimentPage(Schema):
 @router.get("/experiments", response=ExperimentPage, auth=research_auth)
 def list_experiments(request, strategy: str | None = None, kind: str | None = None,
                      decision: str | None = None, limit: int = 100, offset: int = 0):
-    rows = Experiment.objects.all()
+    rows = Experiment.objects.defer("returns")
     if strategy:
         rows = rows.filter(strategy=strategy)
     if kind:
@@ -176,6 +176,46 @@ def create_job(request, payload: JobIn):
     except JobError as exc:
         raise HttpError(400, str(exc)) from exc
     job = ResearchJob.objects.create(kind=ResearchJob.Kind.RESEARCH_REPORT, params=params, created_by=request.user)
+    if key is not None:
+        ResearchApiKey.objects.filter(pk=key.pk).update(jobs_started=F("jobs_started") + 1)
+    audit("research.job", request=request, target=f"job:{job.pk}", params=params,
+          via_key=f"{key.name} ({key.prefix})" if key else "")
+    return job
+
+
+class WalkForwardJobIn(Schema):
+    strategy: str
+    symbol: str = "BTC/USDT"
+    timeframe: str = "4h"
+    # "section.key" -> list of values; with several variants, each fold uses
+    # the one with the best Sharpe before it
+    params: dict[str, list] = {}
+    # first out-of-sample window start; folds then step by test_months up to the holdout
+    first_test: str = "2022-01-01"
+    test_months: int = 6
+
+
+@router.post("/walk-forward-jobs", response=JobOut, auth=research_auth)
+def create_walk_forward_job(request, payload: WalkForwardJobIn):
+    """Anchored walk-forward validation with a deflated Sharpe ratio and a
+    bootstrap range (holdout excluded)."""
+    from research.walkforward_jobs import check_not_repeat_walk_forward, validate_walk_forward_params
+
+    key = getattr(request, "research_key", None)
+    if key is None:
+        if request.user.role == "viewer":
+            raise HttpError(403, "viewers can't start research jobs")
+        require_verified(request)
+    elif key.jobs_started >= key.max_jobs:
+        raise HttpError(429, f"this key has started its limit of {key.max_jobs} jobs; create a new one")
+    try:
+        params = validate_walk_forward_params(payload.dict())
+        check_not_repeat_walk_forward(params)
+    except RepeatJobError as exc:
+        raise HttpError(409, str(exc)) from exc
+    except JobError as exc:
+        raise HttpError(400, str(exc)) from exc
+    job = ResearchJob.objects.create(kind=ResearchJob.Kind.WALK_FORWARD, params=params, created_by=request.user)
     if key is not None:
         ResearchApiKey.objects.filter(pk=key.pk).update(jobs_started=F("jobs_started") + 1)
     audit("research.job", request=request, target=f"job:{job.pk}", params=params,

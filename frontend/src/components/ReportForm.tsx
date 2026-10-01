@@ -138,7 +138,7 @@ export default function ReportForm({ initial }: { initial: ReportDraft }) {
     set({ rows: merged })
   }
 
-  const submit = async () => {
+  const submit = async (walkForward = false) => {
     setError(null)
     try {
       const params: Record<string, unknown[]> = {}
@@ -148,10 +148,13 @@ export default function ReportForm({ initial }: { initial: ReportDraft }) {
         if (!values.length) throw new Error(`give ${row.path} at least one value, or remove it`)
         params[row.path] = values.map((v) => coerce(v, fallback))
       }
+      const common = { strategy: draft.strategy, symbol: 'BTC/USDT', timeframe: draft.timeframe, params }
       await unwrap(
-        client.POST('/api/research/jobs', {
-          body: { strategy: draft.strategy, symbol: 'BTC/USDT', timeframe: draft.timeframe, baseline: draft.baseline, params },
-        }),
+        walkForward
+          ? client.POST('/api/research/walk-forward-jobs', {
+              body: { ...common, first_test: '2022-01-01', test_months: 6 },
+            })
+          : client.POST('/api/research/jobs', { body: { ...common, baseline: draft.baseline } }),
       )
       setQueued(true)
       qc.invalidateQueries({ queryKey: keys.jobs })
@@ -253,8 +256,15 @@ export default function ReportForm({ initial }: { initial: ReportDraft }) {
         Runs on the train (2020–2023) and test (2024 to the holdout) windows; the holdout window is never used here.
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-3">
-        <Button variant="primary" onClick={submit} disabled={variants > MAX_VARIANTS}>
+        <Button variant="primary" onClick={() => submit()} disabled={variants > MAX_VARIANTS}>
           Run report
+        </Button>
+        <Button
+          onClick={() => submit(true)}
+          disabled={variants > MAX_VARIANTS}
+          title="Six-month out-of-sample folds from 2022 to the holdout, with a deflated Sharpe that counts every variant tried"
+        >
+          Walk-forward
         </Button>
         <span className={`text-[13px] ${variants > MAX_VARIANTS ? 'text-down' : 'text-ink-2'}`}>
           {variants} {variants === 1 ? 'variant' : 'variants'}

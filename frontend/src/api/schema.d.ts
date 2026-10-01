@@ -986,6 +986,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/research/walk-forward-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Walk Forward Job
+         * @description Anchored walk-forward validation with a deflated Sharpe ratio and a
+         *     bootstrap range (holdout excluded).
+         */
+        post: operations["research_api_create_walk_forward_job"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/strategies": {
         parameters: {
             query?: never;
@@ -2360,6 +2381,38 @@ export interface components {
             supports_live: boolean;
             /** Taker Fee */
             taker_fee: number;
+        };
+        /** WalkForwardJobIn */
+        WalkForwardJobIn: {
+            /**
+             * First Test
+             * @default 2022-01-01
+             */
+            first_test: string;
+            /**
+             * Params
+             * @default {}
+             */
+            params: {
+                [key: string]: unknown[];
+            };
+            /** Strategy */
+            strategy: string;
+            /**
+             * Symbol
+             * @default BTC/USDT
+             */
+            symbol: string;
+            /**
+             * Test Months
+             * @default 6
+             */
+            test_months: number;
+            /**
+             * Timeframe
+             * @default 4h
+             */
+            timeframe: string;
         };
     };
     responses: never;
@@ -3850,6 +3903,30 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ShadowHistory"];
+                };
+            };
+        };
+    };
+    research_api_create_walk_forward_job: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WalkForwardJobIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobOut"];
                 };
             };
         };

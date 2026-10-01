@@ -38,6 +38,13 @@ def report_done(job: ResearchJob) -> None:
     if job.status == ResearchJob.Status.FAILED:
         notify(AlertRule.Kind.RESEARCH_DONE, f"Research report failed: {params.get('strategy')}", job.error[:500])
         return
+    if job.kind == ResearchJob.Kind.WALK_FORWARD:
+        from research.walkforward_jobs import report_lines
+
+        notify(AlertRule.Kind.RESEARCH_DONE,
+               f"Walk-forward ready: {params.get('strategy')} on {params.get('timeframe')}",
+               "\n".join(report_lines(job.result)))
+        return
     lines = []
     for run in job.result.get("runs", []):
         test = (run.get("windows") or {}).get("test") or {}

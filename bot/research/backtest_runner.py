@@ -20,6 +20,43 @@ def with_override(strategy_config: dict, section: str, key: str, value) -> dict:
     return {**strategy_config, section: {**strategy_config.get(section, {}), key: value}}
 
 
+def run_strategy_backtest(
+    df: pd.DataFrame,
+    strategy_name: str,
+    strategy_config: dict,
+    backtest_config: dict,
+    funding_df: pd.DataFrame | None = None,
+    warmup_df: pd.DataFrame | None = None,
+):
+    """The backtest result (trades + equity curve) for one strategy on
+    `df`. `warmup_df`: longer history ending where `df` ends, used only by
+    exposure strategies (fraction-of-capital sizing, e.g. donchian_ensemble)
+    to compute targets before the window starts — their longest lookback is
+    a year, which would otherwise sit idle through the first year of `df`."""
+    strategy = build_strategy(strategy_name, strategy_config, funding_df=funding_df)
+    if hasattr(strategy, "target_weights"):
+        weights = None
+        if warmup_df is not None and len(warmup_df):
+            weights = strategy.target_weights(warmup_df).reindex(df.index)
+        return run_exposure_backtest(
+            df,
+            strategy,
+            fee=backtest_config.get("fee", 0.001),
+            slippage=backtest_config.get("slippage", 0.0005),
+            initial_capital=backtest_config.get("initial_capital", 10_000.0),
+            weights=weights,
+        )
+    return run_backtest(
+        df,
+        strategy,
+        fee=backtest_config.get("fee", 0.001),
+        slippage=backtest_config.get("slippage", 0.0005),
+        initial_capital=backtest_config.get("initial_capital", 10_000.0),
+        risk_pct=backtest_config.get("risk_pct", 0.01),
+        pyramid=strategy_config.get("pyramid"),
+    )
+
+
 def run_backtest_summary(
     df: pd.DataFrame,
     strategy_name: str,
@@ -29,34 +66,8 @@ def run_backtest_summary(
     funding_df: pd.DataFrame | None = None,
     warmup_df: pd.DataFrame | None = None,
 ) -> tuple[dict, pd.Series]:
-    """Returns (summary, equity_curve). `warmup_df`: longer history ending
-    where `df` ends, used only by exposure strategies (fraction-of-capital
-    sizing, e.g. donchian_ensemble) to compute targets before the window
-    starts — their longest lookback is a year, which would otherwise sit
-    idle through the first year of `df`."""
-    strategy = build_strategy(strategy_name, strategy_config, funding_df=funding_df)
-    if hasattr(strategy, "target_weights"):
-        weights = None
-        if warmup_df is not None and len(warmup_df):
-            weights = strategy.target_weights(warmup_df).reindex(df.index)
-        result = run_exposure_backtest(
-            df,
-            strategy,
-            fee=backtest_config.get("fee", 0.001),
-            slippage=backtest_config.get("slippage", 0.0005),
-            initial_capital=backtest_config.get("initial_capital", 10_000.0),
-            weights=weights,
-        )
-    else:
-        result = run_backtest(
-            df,
-            strategy,
-            fee=backtest_config.get("fee", 0.001),
-            slippage=backtest_config.get("slippage", 0.0005),
-            initial_capital=backtest_config.get("initial_capital", 10_000.0),
-            risk_pct=backtest_config.get("risk_pct", 0.01),
-            pyramid=strategy_config.get("pyramid"),
-        )
+    """Returns (summary, equity_curve); see run_strategy_backtest."""
+    result = run_strategy_backtest(df, strategy_name, strategy_config, backtest_config, funding_df, warmup_df)
     summary = summarize(
         result.trades,
         result.equity_curve,

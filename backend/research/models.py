@@ -35,6 +35,9 @@ class Experiment(models.Model):
     # the same computation, which is what the repeat check looks for.
     run_key = models.CharField(max_length=24, blank=True, db_index=True)
     job = models.ForeignKey("ResearchJob", null=True, blank=True, on_delete=models.SET_NULL, related_name="experiments")
+    # daily returns of the whole run as [[unix day, return], ...] (walk-forward
+    # runs), kept so overfitting tests across a family's variants are possible
+    returns = models.JSONField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -63,6 +66,7 @@ class ResearchJob(models.Model):
         BACKTEST = "backtest", "Backtest"
         RESEARCH_REPORT = "research_report", "Research report"
         PORTFOLIO_REPORT = "portfolio_report", "Portfolio report"
+        WALK_FORWARD = "walk_forward", "Walk-forward validation"
 
     class Status(models.TextChoices):
         QUEUED = "queued", "Queued"
