@@ -134,3 +134,55 @@ def test_bot_makes_no_decision_from_bad_data(account, owner, quotes, monkeypatch
     assert decision.action == "blocked" and "stale data" in decision.reason and decision.order is None
     engine().run_bot(bot)  # same problem: no second alert
     assert AlertEvent.objects.filter(title__startswith="SIGNALS PAUSED").count() == 1
+
+
+def test_every_call_records_its_lineage(owner):
+    make_candles([100.0] * 70 + [110.0])
+    f = feed()
+    [entry] = run_feed(f, "binance", FUNDING)
+    entry.refresh_from_db()
+    assert len(entry.code_version) == 12 and len(entry.config_hash) == 16 and len(entry.data_digest) == 16
+    assert entry.data_rows == 71 and entry.data_to == entry.bar_time
+    # same settings and candles: same hashes; different settings: different config hash
+    from core.lineage import config_hash
+    from trading.services.bots import strategy_config_with
+
+    cfg = strategy_config_with(f.params)
+    assert config_hash("donchian", f.symbol, f.timeframe, cfg) == entry.config_hash
+    other = strategy_config_with({**f.params, "donchian.channel_period": 6})
+    assert config_hash("donchian", f.symbol, f.timeframe, other) != entry.config_hash
+    # another strategy's settings don't count
+    unrelated = strategy_config_with({**f.params, "donchian_ensemble.rebalance_threshold": 0.2})
+    assert config_hash("donchian", f.symbol, f.timeframe, unrelated) == entry.config_hash
+
+
+def test_settings_that_drift_from_the_approved_version_pause_the_feed(owner):
+    make_candles([100.0] * 70 + [110.0])
+    f = feed()
+    client = Client()
+    client.force_login(owner)
+    r = client.post(f"/api/recommendations/feeds/{f.pk}/approve", json.dumps({"note": "from holdout check"}),
+                    content_type="application/json")
+    assert r.status_code == 200 and r.json()["approved_config_hash"] == r.json()["config_hash"]
+
+    f.refresh_from_db()
+    f.params = {**f.params, "donchian.channel_period": 6}
+    f.save()
+    [event] = run_feed(f, "binance", FUNDING)
+    assert event.kind == Recommendation.Kind.SUPPRESSED and "settings differ" in event.reason
+    assert event.config_hash != f.approved_config_hash
+
+    # re-approving the new settings and resuming lets it run
+    client.post(f"/api/recommendations/feeds/{f.pk}/approve", "{}", content_type="application/json")
+    client.post(f"/api/recommendations/feeds/{f.pk}/resume", json.dumps({"acknowledged": True}),
+                content_type="application/json")
+    assert [e.kind for e in run_feed(Feed.objects.get(pk=f.pk), "binance", FUNDING)] == ["entry"]
+
+
+def test_bot_decisions_record_lineage(account, owner, quotes):
+    make_candles([100.0] * 70 + [110.0])
+    quotes.set("BTC/USDT", 110, 111)
+    bot = running_bot(account, owner, name="breakout", strategy="donchian", timeframe="1d", allocation=5_000,
+                      params={"donchian.channel_period": 5, "donchian.exit_channel_period": 5})
+    decision = engine().run_bot(bot)
+    assert decision.config_hash and decision.data_rows == 71 and decision.code_version

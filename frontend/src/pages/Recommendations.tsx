@@ -240,6 +240,11 @@ function Feeds() {
   })
   const [sizing, setSizing] = useState<Feed | null>(null)
   const [halting, setHalting] = useState<Feed | null>(null)
+  const approve = useMutation({
+    mutationFn: (f: Feed) =>
+      unwrap(client.POST('/api/recommendations/feeds/{feed_id}/approve', { params: { path: { feed_id: f.id } }, body: { note: '' } })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.feeds }),
+  })
   const toggle = useMutation({
     mutationFn: (f: Feed) =>
       unwrap(
@@ -281,6 +286,28 @@ function Feeds() {
                 <div className="font-semibold">{f.name}</div>
                 <div className="text-[12px] text-muted">
                   {f.strategy} on {f.timeframe}
+                </div>
+                <div className="text-[12px]" title={`settings ${f.config_hash}`}>
+                  {!f.approved_config_hash ? (
+                    <span className="text-muted">settings not pinned</span>
+                  ) : f.approved_config_hash === f.config_hash ? (
+                    <span className="text-ink-2">
+                      settings approved{f.approved_experiment_id ? ` (experiment #${f.approved_experiment_id})` : ''}
+                    </span>
+                  ) : (
+                    <span className="font-semibold text-down">settings changed since approval</span>
+                  )}
+                  {me?.role === 'owner' && f.approved_config_hash !== f.config_hash && (
+                    <button
+                      className="ml-1.5 underline"
+                      onClick={() => {
+                        if (window.confirm(`Approve the current settings of ${f.name}? If they change later, its signals pause.`))
+                          approve.mutate(f)
+                      }}
+                    >
+                      approve
+                    </button>
+                  )}
                 </div>
               </td>
               <td>
@@ -332,7 +359,7 @@ function Feeds() {
           ))}
         </tbody>
       </table>
-      <ErrorText error={toggle.error} />
+      <ErrorText error={toggle.error ?? approve.error} />
       {sizing && <SizingDialog feed={sizing} onClose={() => setSizing(null)} />}
       {halting && <HaltDialog feed={halting} onClose={() => setHalting(null)} />}
     </div>
@@ -417,9 +444,15 @@ function History({ feeds }: { feeds: string[] }) {
                       {e.imported && <span className="text-muted"> (before the app)</span>}
                     </td>
                   </tr>
-                  {open === e.id && Object.keys(e.context).length > 0 && (
+                  {open === e.id && (Object.keys(e.context).length > 0 || e.config_hash) && (
                     <tr>
                       <td colSpan={4} className="bg-sunken">
+                        {e.config_hash && (
+                          <div className="mb-1 font-mono text-[12px] text-ink-2">
+                            code {e.code_version} · settings {e.config_hash} · data {e.data_rows} candles to{' '}
+                            {e.data_to ? dateTime(e.data_to) : '—'} ({e.data_digest})
+                          </div>
+                        )}
                         <pre className="whitespace-pre-wrap break-all text-[12px] text-ink-2">{JSON.stringify(e.context, null, 2)}</pre>
                       </td>
                     </tr>

@@ -1,5 +1,7 @@
 from django.db import models
 
+from core.models import LineageFields
+
 
 class Feed(models.Model):
     """One strategy's advisory feed for manual trading on MT5/Exness, the
@@ -45,6 +47,13 @@ class Feed(models.Model):
     halted = models.BooleanField(default=False)
     halt_reason = models.CharField(max_length=300, blank=True)
     halted_at = models.DateTimeField(null=True, blank=True)
+    # the settings a person approved for this feed (core/lineage.config_hash),
+    # ideally from a validated experiment; calls stop if the live settings differ
+    approved_config_hash = models.CharField(max_length=16, blank=True)
+    approved_experiment = models.ForeignKey("research.Experiment", null=True, blank=True,
+                                            on_delete=models.SET_NULL, related_name="+")
+    approved_at = models.DateTimeField(null=True, blank=True)
+    approved_by = models.CharField(max_length=150, blank=True)
 
     # the recommended position (signal strategies)
     direction = models.CharField(max_length=5, blank=True)  # "", "long", "short"
@@ -80,7 +89,7 @@ class Feed(models.Model):
         return self.capital
 
 
-class Recommendation(models.Model):
+class Recommendation(LineageFields):
     """Every call a feed made: the history you traded from."""
 
     class Kind(models.TextChoices):

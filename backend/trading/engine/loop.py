@@ -29,6 +29,7 @@ from django.utils import timezone as dj_timezone
 from bot.broker.base import BrokerError
 from bot.data.exchange import create_exchange
 from bot.shadow.runner import drop_incomplete_bar
+from core.lineage import lineage
 from market.candles import backfill_candles, backfill_funding, candles_df, funding_df
 from market.health import check_series
 from alerts.models import AlertRule
@@ -39,7 +40,7 @@ from recommendations.runner import run_feed
 from trading.events import SYSTEM_GROUP, market_group, publish
 from trading.models import Bot, BotDecision, EquitySnapshot, LedgerEntry, Order, Position, TradingAccount
 from trading.services import books
-from trading.services.bots import TIMEFRAMES, build_bot_strategy, trade_bot_config
+from trading.services.bots import TIMEFRAMES, build_bot_strategy, strategy_config_for, trade_bot_config
 from trading.services.brokers import get_broker, quote_source
 from trading.services.orders import close_position, sync_open_orders
 
@@ -266,6 +267,7 @@ class Engine:
         bar_time = df.index[-1].to_pydatetime()
         if bot.last_bar_at is not None and bar_time <= bot.last_bar_at:
             return None
+        trace = lineage(bot.strategy, bot.symbol, bot.timeframe, strategy_config_for(bot), df)
         health = check_series(df, bot.timeframe)
         if not health.ok:
             # no decision from bad data; the bar is retried each tick in case
@@ -274,7 +276,7 @@ class Engine:
             decision, _ = BotDecision.objects.update_or_create(
                 bot=bot, bar_time=bar_time,
                 defaults={"action": BotDecision.Action.BLOCKED, "reason": reason, "diagnosis": {},
-                          "order": None, "price": float(df["close"].iloc[-1])},
+                          "order": None, "price": float(df["close"].iloc[-1]), **trace},
             )
             if bot.status_reason != reason:
                 bot.status_reason = reason
@@ -293,7 +295,7 @@ class Engine:
                 defaults={
                     "action": outcome.action, "reason": outcome.reason[:500],
                     "diagnosis": jsonable(outcome.diagnosis), "order": outcome.order,
-                    "price": float(df["close"].iloc[-1]),
+                    "price": float(df["close"].iloc[-1]), **trace,
                 },
             )
             bot.last_bar_at = bar_time

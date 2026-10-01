@@ -683,6 +683,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/recommendations/feeds/{feed_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve
+         * @description Pins the feed's current settings: if they change later (feed params or
+         *     config.yaml), the feed pauses until they're approved again.
+         */
+        post: operations["recommendations_api_approve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/recommendations/feeds/{feed_id}/enabled": {
         parameters: {
             query?: never;
@@ -1201,6 +1222,16 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** ApproveIn */
+        ApproveIn: {
+            /** Experiment Id */
+            experiment_id?: number | null;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
         /** AuditOut */
         AuditOut: {
             /** Account Id */
@@ -1372,6 +1403,16 @@ export interface components {
              * Format: date-time
              */
             bar_time: string;
+            /** Code Version */
+            code_version: string;
+            /** Config Hash */
+            config_hash: string;
+            /** Data Digest */
+            data_digest: string;
+            /** Data Rows */
+            data_rows: number | null;
+            /** Data To */
+            data_to: string | null;
             /** Diagnosis */
             diagnosis: {
                 [key: string]: unknown;
@@ -1471,8 +1512,18 @@ export interface components {
         };
         /** FeedOut */
         FeedOut: {
+            /** Approved At */
+            approved_at: string | null;
+            /** Approved By */
+            approved_by: string;
+            /** Approved Config Hash */
+            approved_config_hash: string;
+            /** Approved Experiment Id */
+            approved_experiment_id: number | null;
             /** Capital */
             capital: number | null;
+            /** Config Hash */
+            config_hash: string;
             /** Contract Size */
             contract_size: number;
             /** Current Capital */
@@ -1928,10 +1979,22 @@ export interface components {
              * Format: date-time
              */
             bar_time: string;
+            /** Code Version */
+            code_version: string;
+            /** Config Hash */
+            config_hash: string;
             /** Context */
             context: {
                 [key: string]: unknown;
             };
+            /** Data Digest */
+            data_digest: string;
+            /** Data From */
+            data_from: string | null;
+            /** Data Rows */
+            data_rows: number | null;
+            /** Data To */
+            data_to: string | null;
             /** Direction */
             direction: string;
             /** Fear Greed */
@@ -3317,6 +3380,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FeedOut"][];
+                };
+            };
+        };
+    };
+    recommendations_api_approve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feed_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApproveIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedOut"];
                 };
             };
         };

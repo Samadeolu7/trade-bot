@@ -281,6 +281,28 @@
         "title": "ApiKeyOut",
         "type": "object"
       },
+      "ApproveIn": {
+        "properties": {
+          "experiment_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Id"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "title": "ApproveIn",
+        "type": "object"
+      },
       "AuditOut": {
         "properties": {
           "account_id": {
@@ -717,6 +739,41 @@
             "title": "Bar Time",
             "type": "string"
           },
+          "code_version": {
+            "title": "Code Version",
+            "type": "string"
+          },
+          "config_hash": {
+            "title": "Config Hash",
+            "type": "string"
+          },
+          "data_digest": {
+            "title": "Data Digest",
+            "type": "string"
+          },
+          "data_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Rows"
+          },
+          "data_to": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data To"
+          },
           "diagnosis": {
             "additionalProperties": true,
             "title": "Diagnosis",
@@ -760,7 +817,12 @@
           "reason",
           "price",
           "order_id",
-          "diagnosis"
+          "diagnosis",
+          "code_version",
+          "config_hash",
+          "data_to",
+          "data_rows",
+          "data_digest"
         ],
         "title": "DecisionOut",
         "type": "object"
@@ -972,6 +1034,37 @@
       },
       "FeedOut": {
         "properties": {
+          "approved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "approved_by": {
+            "title": "Approved By",
+            "type": "string"
+          },
+          "approved_config_hash": {
+            "title": "Approved Config Hash",
+            "type": "string"
+          },
+          "approved_experiment_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved Experiment Id"
+          },
           "capital": {
             "anyOf": [
               {
@@ -982,6 +1075,10 @@
               }
             ],
             "title": "Capital"
+          },
+          "config_hash": {
+            "title": "Config Hash",
+            "type": "string"
           },
           "contract_size": {
             "title": "Contract Size",
@@ -1199,7 +1296,12 @@
           "lots_held",
           "halted",
           "halt_reason",
-          "halted_at"
+          "halted_at",
+          "config_hash",
+          "approved_config_hash",
+          "approved_experiment_id",
+          "approved_at",
+          "approved_by"
         ],
         "title": "FeedOut",
         "type": "object"
@@ -2227,10 +2329,57 @@
             "title": "Bar Time",
             "type": "string"
           },
+          "code_version": {
+            "title": "Code Version",
+            "type": "string"
+          },
+          "config_hash": {
+            "title": "Config Hash",
+            "type": "string"
+          },
           "context": {
             "additionalProperties": true,
             "title": "Context",
             "type": "object"
+          },
+          "data_digest": {
+            "title": "Data Digest",
+            "type": "string"
+          },
+          "data_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data From"
+          },
+          "data_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Rows"
+          },
+          "data_to": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data To"
           },
           "direction": {
             "title": "Direction",
@@ -2347,7 +2496,13 @@
           "reason",
           "context",
           "fear_greed",
-          "imported"
+          "imported",
+          "code_version",
+          "config_hash",
+          "data_from",
+          "data_to",
+          "data_rows",
+          "data_digest"
         ],
         "title": "RecommendationOut",
         "type": "object"
@@ -5092,6 +5247,54 @@
           }
         ],
         "summary": "List Feeds",
+        "tags": [
+          "recommendations"
+        ]
+      }
+    },
+    "/api/recommendations/feeds/{feed_id}/approve": {
+      "post": {
+        "description": "Pins the feed's current settings: if they change later (feed params or\nconfig.yaml), the feed pauses until they're approved again.",
+        "operationId": "recommendations_api_approve",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feed_id",
+            "required": true,
+            "schema": {
+              "title": "Feed Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "Approve",
         "tags": [
           "recommendations"
         ]

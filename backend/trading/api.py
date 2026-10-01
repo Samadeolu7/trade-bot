@@ -531,6 +531,11 @@ class DecisionOut(Schema):
     price: float | None
     order_id: int | None
     diagnosis: dict
+    code_version: str
+    config_hash: str
+    data_to: datetime | None
+    data_rows: int | None
+    data_digest: str
 
 
 class BotOut(Schema):
@@ -564,7 +569,9 @@ def _decision_out(d: BotDecision | None) -> dict | None:
     if d is None:
         return None
     return {"id": d.pk, "bar_time": d.bar_time, "action": d.action, "reason": d.reason, "price": d.price,
-            "order_id": d.order_id, "diagnosis": d.diagnosis}
+            "order_id": d.order_id, "diagnosis": d.diagnosis, "code_version": d.code_version,
+            "config_hash": d.config_hash, "data_to": d.data_to, "data_rows": d.data_rows,
+            "data_digest": d.data_digest}
 
 
 def _invested(balances, prices, base, equity) -> float | None:

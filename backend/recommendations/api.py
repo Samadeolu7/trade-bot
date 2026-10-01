@@ -7,7 +7,8 @@ from ninja.errors import HttpError
 from bot.broker.base import BrokerError
 from core.audit import audit
 from recommendations.models import Feed, Recommendation, SignalSwitch
-from recommendations.runner import halt_feed, resume_feed
+from recommendations.runner import feed_config_hash, halt_feed, resume_feed
+from research.models import Experiment
 from trading.permissions import require_owner
 from trading.services.brokers import quote_source
 
@@ -44,6 +45,11 @@ class FeedOut(Schema):
     halted: bool
     halt_reason: str
     halted_at: datetime | None
+    config_hash: str
+    approved_config_hash: str
+    approved_experiment_id: int | None
+    approved_at: datetime | None
+    approved_by: str
 
 
 def _mid(symbol: str) -> float | None:
@@ -73,6 +79,9 @@ def _feed_out(feed: Feed, prices: dict) -> dict:
         "capital": feed.capital, "current_capital": feed.current_capital, "contract_size": feed.contract_size,
         "min_lot": feed.min_lot, "lot_step": feed.lot_step, "risk_pct": feed.risk_pct, "lots_held": feed.lots_held,
         "halted": feed.halted, "halt_reason": feed.halt_reason, "halted_at": feed.halted_at,
+        "config_hash": feed_config_hash(feed), "approved_config_hash": feed.approved_config_hash,
+        "approved_experiment_id": feed.approved_experiment_id, "approved_at": feed.approved_at,
+        "approved_by": feed.approved_by,
     }
 
 
@@ -185,6 +194,35 @@ def resume(request, feed_id: int, payload: ResumeIn):
     return _feed_out(feed, {})
 
 
+class ApproveIn(Schema):
+    # the research experiment these settings were validated in, if any
+    experiment_id: int | None = None
+    note: str = ""
+
+
+@router.post("/feeds/{feed_id}/approve", response=FeedOut)
+def approve(request, feed_id: int, payload: ApproveIn):
+    """Pins the feed's current settings: if they change later (feed params or
+    config.yaml), the feed pauses until they're approved again."""
+    require_owner(request)
+    feed = _get_feed(feed_id)
+    experiment = None
+    if payload.experiment_id is not None:
+        experiment = Experiment.objects.filter(pk=payload.experiment_id).first()
+        if experiment is None:
+            raise HttpError(404, "no such experiment")
+        if experiment.strategy != feed.strategy:
+            raise HttpError(400, f"that experiment tested {experiment.strategy}, not {feed.strategy}")
+    feed.approved_config_hash = feed_config_hash(feed)
+    feed.approved_experiment = experiment
+    feed.approved_at = timezone.now()
+    feed.approved_by = request.user.username
+    feed.save(update_fields=["approved_config_hash", "approved_experiment", "approved_at", "approved_by"])
+    audit("recommendations.approve", request=request, target=f"feed:{feed.name}",
+          config_hash=feed.approved_config_hash, experiment=payload.experiment_id, note=payload.note)
+    return _feed_out(feed, {})
+
+
 class SwitchOut(Schema):
     halted: bool
     reason: str
@@ -240,6 +278,12 @@ class RecommendationOut(Schema):
     context: dict
     fear_greed: str
     imported: bool
+    code_version: str
+    config_hash: str
+    data_from: datetime | None
+    data_to: datetime | None
+    data_rows: int | None
+    data_digest: str
 
 
 @router.get("/events", response=list[RecommendationOut])
@@ -258,6 +302,8 @@ def list_events(request, feed: str | None = None, kind: str | None = None, inclu
             "direction": r.direction, "price": r.price, "stop": r.stop, "take_profit": r.take_profit,
             "from_weight": r.from_weight, "to_weight": r.to_weight, "pnl_pct": r.pnl_pct, "reason": r.reason,
             "context": r.context, "fear_greed": r.fear_greed, "imported": r.imported,
+            "code_version": r.code_version, "config_hash": r.config_hash, "data_from": r.data_from,
+            "data_to": r.data_to, "data_rows": r.data_rows, "data_digest": r.data_digest,
         }
         for r in rows[: min(limit, 1000)]
     ]

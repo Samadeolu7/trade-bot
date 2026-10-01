@@ -42,3 +42,19 @@ class AuditEvent(models.Model):
     def __str__(self) -> str:
         who = self.actor.username if self.actor else self.actor_label or "system"
         return f"{self.created_at:%Y-%m-%d %H:%M} {who} {self.action} {self.target}"
+
+
+class LineageFields(models.Model):
+    """What produced a call: the code, the settings and the candles it was
+    computed from (core/lineage.py). Blank on rows made before lineage was
+    recorded, or brought over from elsewhere."""
+
+    code_version = models.CharField(max_length=16, blank=True)
+    config_hash = models.CharField(max_length=16, blank=True, db_index=True)
+    data_from = models.DateTimeField(null=True, blank=True)
+    data_to = models.DateTimeField(null=True, blank=True)
+    data_rows = models.IntegerField(null=True, blank=True)
+    data_digest = models.CharField(max_length=16, blank=True)
+
+    class Meta:
+        abstract = True

@@ -5,6 +5,7 @@ from django.conf import settings
 from django.db import models
 
 from bot.broker.venues import VENUES, get_venue
+from core.models import LineageFields
 
 MONEY = {"max_digits": 28, "decimal_places": 10}
 VENUE_CHOICES = [(key, v.label) for key, v in VENUES.items()]
@@ -142,7 +143,7 @@ class Bot(models.Model):
         return bot_book(self.pk)
 
 
-class BotDecision(models.Model):
+class BotDecision(LineageFields):
     """What a bot concluded on one completed bar, and why, including the
     bars where it did nothing. This is how "what is the bot doing" is
     answered without guessing."""

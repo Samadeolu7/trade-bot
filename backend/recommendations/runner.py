@@ -20,6 +20,7 @@ from bot.backtest.exposure import mark_to_market, rebalance
 from bot.data.sentiment import fetch_fear_greed_index
 from bot.shadow.runner import drop_incomplete_bar
 from bot.strategy.registry import build_strategy
+from core.lineage import config_hash, lineage
 from market.candles import candles_df, funding_df
 from market.health import check_series
 from recommendations.messages import describe
@@ -213,14 +214,19 @@ def _open_position_note(feed: Feed) -> str:
     return "You have no open position from this feed."
 
 
-def halt_feed(feed: Feed, reason: str, bar_time=None, price: float | None = None, by: str = "") -> Recommendation:
+def feed_config_hash(feed: Feed) -> str:
+    return config_hash(feed.strategy, feed.symbol, feed.timeframe, strategy_config_with(feed.params))
+
+
+def halt_feed(feed: Feed, reason: str, bar_time=None, price: float | None = None, by: str = "",
+              trace: dict | None = None) -> Recommendation:
     """Kill switch for one feed: records why signals stopped, alerts, and
     makes no further calls until a person resumes it."""
     now = timezone.now()
     with transaction.atomic():
         event = Recommendation.objects.create(
             feed=feed, kind=Recommendation.Kind.SUPPRESSED, bar_time=bar_time or now, price=price,
-            reason=reason[:500], context={"by": by} if by else {},
+            reason=reason[:500], context={"by": by} if by else {}, **(trace or {}),
         )
         feed.halted, feed.halt_reason, feed.halted_at = True, reason[:300], now
         feed.status_reason = f"paused: {reason}"[:300]
@@ -271,10 +277,17 @@ def run_feed(feed: Feed, exchange_id: str, funding_config: dict) -> list[Recomme
         feed.save(update_fields=["status_reason"])
         return []
     bar_time = df.index[-1].to_pydatetime()
+    close = float(df["close"].iloc[-1])
+    trace = lineage(feed.strategy, feed.symbol, feed.timeframe, strategy_config_with(feed.params), df)
     # before the same-bar check, so data that stops arriving is caught too
     health = check_series(df, feed.timeframe)
     if not health.ok:
-        return [halt_feed(feed, f"data check failed: {health.summary()}", bar_time, float(df["close"].iloc[-1]))]
+        return [halt_feed(feed, f"data check failed: {health.summary()}", bar_time, close, trace=trace)]
+    if feed.approved_config_hash and trace["config_hash"] != feed.approved_config_hash:
+        return [halt_feed(
+            feed, f"settings differ from the approved version ({feed.approved_config_hash} approved, "
+                  f"{trace['config_hash']} now): approve the new settings or put the old ones back",
+            bar_time, close, trace=trace)]
     if feed.last_bar_at is not None and bar_time <= feed.last_bar_at:
         return []
 
@@ -291,6 +304,8 @@ def run_feed(feed: Feed, exchange_id: str, funding_config: dict) -> list[Recomme
                 if miss is not None:
                     events.append(miss)
         for event in events:
+            for key, value in trace.items():
+                setattr(event, key, value)
             event.save()
         feed.last_diagnosis = diagnosis
         feed.last_bar_at = bar_time
