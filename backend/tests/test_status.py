@@ -45,3 +45,31 @@ def test_status_is_rate_limited(monkeypatch):
     client = Client()
     codes = [client.get("/api/public/status").status_code for _ in range(4)]
     assert codes == [200, 200, 200, 429]
+
+
+def test_status_flags_feeds_whose_alerts_go_nowhere(owner):
+    from alerts.models import AlertRule
+
+    beat()
+    Feed.objects.create(name="f", strategy="donchian", timeframe="4h")
+    problems = status.build_status()["problems"]
+    assert any("recommendation alerts are turned off" in p for p in problems)
+    AlertRule.objects.create(user=owner, kind="recommendation")
+    assert not any("recommendation alerts" in p for p in status.build_status()["problems"])
+
+
+def test_migration_adds_rules_people_set_up_before_the_feed_existed(owner, django_user_model):
+    import importlib
+
+    from django.apps import apps
+
+    from alerts.models import AlertRule
+
+    AlertRule.objects.create(user=owner, kind="daily_summary")
+    AlertRule.objects.create(user=owner, kind="near_miss", enabled=False)  # their choice stays
+    other = django_user_model.objects.create_user("viewer2", password="x" * 12)  # no rules: untouched
+    migration = importlib.import_module("alerts.migrations.0008_add_recommendation_rules")
+    migration.add_missing(apps, None)
+    kinds = dict(AlertRule.objects.filter(user=owner).values_list("kind", "enabled"))
+    assert kinds["recommendation"] is True and kinds["repeat_signal"] is True and kinds["near_miss"] is False
+    assert not AlertRule.objects.filter(user=other).exists()

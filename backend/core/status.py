@@ -125,6 +125,10 @@ def build_status(now: datetime | None = None) -> dict:
         feeds.append({"name": feed.name, "timeframe": feed.timeframe, "state": state,
                       "last_candle_at": feed.last_bar_at, "last_checked_at": feed.last_run_at})
 
+    if any(f["state"] != "off" for f in feeds) and not AlertRule.objects.filter(
+            kind=AlertRule.Kind.RECOMMENDATION, enabled=True, user__is_active=True).exists():
+        problems.append("MT5 recommendation alerts are turned off for everyone: feed calls send nothing")
+
     last_alert = AlertEvent.objects.order_by("-created_at").values_list("created_at", flat=True).first()
     last_summary = (AlertEvent.objects.filter(kind=AlertRule.Kind.DAILY_SUMMARY).order_by("-created_at")
                     .values_list("created_at", flat=True).first())
