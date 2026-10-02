@@ -127,6 +127,45 @@
         "title": "AccountOut",
         "type": "object"
       },
+      "AlertStatus": {
+        "properties": {
+          "last_alert_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Alert At"
+          },
+          "last_daily_summary_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Daily Summary At"
+          },
+          "undelivered_last_24h": {
+            "title": "Undelivered Last 24H",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "last_alert_at",
+          "last_daily_summary_at",
+          "undelivered_last_24h"
+        ],
+        "title": "AlertStatus",
+        "type": "object"
+      },
       "ApiKeyCreated": {
         "properties": {
           "created_at": {
@@ -884,6 +923,32 @@
         "title": "EndpointIn",
         "type": "object"
       },
+      "EngineStatus": {
+        "properties": {
+          "healthy": {
+            "title": "Healthy",
+            "type": "boolean"
+          },
+          "last_seen": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen"
+          }
+        },
+        "required": [
+          "healthy",
+          "last_seen"
+        ],
+        "title": "EngineStatus",
+        "type": "object"
+      },
       "EquityPoint": {
         "properties": {
           "equity": {
@@ -1335,6 +1400,55 @@
           "approved_by"
         ],
         "title": "FeedOut",
+        "type": "object"
+      },
+      "FeedStatus": {
+        "properties": {
+          "last_candle_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Candle At"
+          },
+          "last_checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Checked At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "timeframe": {
+            "title": "Timeframe",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "timeframe",
+          "state",
+          "last_candle_at",
+          "last_checked_at"
+        ],
+        "title": "FeedStatus",
         "type": "object"
       },
       "FillOut": {
@@ -3042,6 +3156,58 @@
         "title": "SizingIn",
         "type": "object"
       },
+      "StatusOut": {
+        "properties": {
+          "alerts": {
+            "$ref": "#/components/schemas/AlertStatus"
+          },
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "engine": {
+            "$ref": "#/components/schemas/EngineStatus"
+          },
+          "feeds": {
+            "items": {
+              "$ref": "#/components/schemas/FeedStatus"
+            },
+            "title": "Feeds",
+            "type": "array"
+          },
+          "overall": {
+            "title": "Overall",
+            "type": "string"
+          },
+          "problems": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "signals_paused": {
+            "title": "Signals Paused",
+            "type": "boolean"
+          },
+          "worker": {
+            "$ref": "#/components/schemas/WorkerStatus"
+          }
+        },
+        "required": [
+          "overall",
+          "problems",
+          "engine",
+          "worker",
+          "signals_paused",
+          "feeds",
+          "alerts",
+          "checked_at"
+        ],
+        "title": "StatusOut",
+        "type": "object"
+      },
       "StrategyOut": {
         "properties": {
           "can_short": {
@@ -3537,6 +3703,42 @@
           "strategy"
         ],
         "title": "WalkForwardJobIn",
+        "type": "object"
+      },
+      "WorkerStatus": {
+        "properties": {
+          "healthy": {
+            "title": "Healthy",
+            "type": "boolean"
+          },
+          "jobs_queued": {
+            "title": "Jobs Queued",
+            "type": "integer"
+          },
+          "jobs_running": {
+            "title": "Jobs Running",
+            "type": "integer"
+          },
+          "last_seen": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen"
+          }
+        },
+        "required": [
+          "healthy",
+          "last_seen",
+          "jobs_running",
+          "jobs_queued"
+        ],
+        "title": "WorkerStatus",
         "type": "object"
       }
     },
@@ -5322,6 +5524,29 @@
         "summary": "Update Protection",
         "tags": [
           "trading"
+        ]
+      }
+    },
+    "/api/public/status": {
+      "get": {
+        "description": "System health, readable without logging in.",
+        "operationId": "core_status_public_status",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Public Status",
+        "tags": [
+          "status"
         ]
       }
     },

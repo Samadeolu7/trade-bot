@@ -16,6 +16,7 @@ import Overview from './pages/Overview'
 import Recommendations from './pages/Recommendations'
 import Research from './pages/Research'
 import Settings from './pages/Settings'
+import Status from './pages/Status'
 import Trade from './pages/Trade'
 import './index.css'
 
@@ -68,7 +69,11 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <App />
+        <Routes>
+          {/* public: readable without signing in */}
+          <Route path="/status" element={<Status />} />
+          <Route path="*" element={<App />} />
+        </Routes>
       </BrowserRouter>
     </QueryClientProvider>
   </StrictMode>,

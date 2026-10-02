@@ -632,6 +632,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/public/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Public Status
+         * @description System health, readable without logging in.
+         */
+        get: operations["core_status_public_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/quote": {
         parameters: {
             query?: never;
@@ -1230,6 +1250,15 @@ export interface components {
             name: string;
             venue: components["schemas"]["VenueOut"];
         };
+        /** AlertStatus */
+        AlertStatus: {
+            /** Last Alert At */
+            last_alert_at: string | null;
+            /** Last Daily Summary At */
+            last_daily_summary_at: string | null;
+            /** Undelivered Last 24H */
+            undelivered_last_24h: number;
+        };
         /** ApiKeyCreated */
         ApiKeyCreated: {
             /**
@@ -1527,6 +1556,13 @@ export interface components {
             /** Endpoint */
             endpoint: string;
         };
+        /** EngineStatus */
+        EngineStatus: {
+            /** Healthy */
+            healthy: boolean;
+            /** Last Seen */
+            last_seen: string | null;
+        };
         /** EquityPoint */
         EquityPoint: {
             /** Equity */
@@ -1671,6 +1707,19 @@ export interface components {
             timeframe: string;
             /** Weight */
             weight: number;
+        };
+        /** FeedStatus */
+        FeedStatus: {
+            /** Last Candle At */
+            last_candle_at: string | null;
+            /** Last Checked At */
+            last_checked_at: string | null;
+            /** Name */
+            name: string;
+            /** State */
+            state: string;
+            /** Timeframe */
+            timeframe: string;
         };
         /** FillOut */
         FillOut: {
@@ -2334,6 +2383,25 @@ export interface components {
              */
             risk_pct: number;
         };
+        /** StatusOut */
+        StatusOut: {
+            alerts: components["schemas"]["AlertStatus"];
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            engine: components["schemas"]["EngineStatus"];
+            /** Feeds */
+            feeds: components["schemas"]["FeedStatus"][];
+            /** Overall */
+            overall: string;
+            /** Problems */
+            problems: string[];
+            /** Signals Paused */
+            signals_paused: boolean;
+            worker: components["schemas"]["WorkerStatus"];
+        };
         /** StrategyOut */
         StrategyOut: {
             /** Can Short */
@@ -2546,6 +2614,17 @@ export interface components {
              * @default 4h
              */
             timeframe: string;
+        };
+        /** WorkerStatus */
+        WorkerStatus: {
+            /** Healthy */
+            healthy: boolean;
+            /** Jobs Queued */
+            jobs_queued: number;
+            /** Jobs Running */
+            jobs_running: number;
+            /** Last Seen */
+            last_seen: string | null;
         };
     };
     responses: never;
@@ -3498,6 +3577,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PositionOut"];
+                };
+            };
+        };
+    };
+    core_status_public_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusOut"];
                 };
             };
         };

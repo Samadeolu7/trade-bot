@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from alerts.models import AlertRule
 from alerts.service import notify
+from core.status import worker_heartbeat
 from research.jobs import run_job
 from research.models import ResearchJob
 from trading.engine.loop import HEARTBEAT_KEY
@@ -66,6 +67,7 @@ class Command(BaseCommand):
         engine_down: bool | None = None
         last_watch = 0.0
         while True:
+            worker_heartbeat()
             if time.monotonic() - last_watch > 30:
                 last_watch = time.monotonic()
                 try:
