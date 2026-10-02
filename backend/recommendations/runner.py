@@ -23,6 +23,7 @@ from bot.strategy.registry import build_strategy
 from core.lineage import config_hash, lineage
 from market.candles import candles_df, funding_df
 from market.health import check_series
+from recommendations.heads_up import no_trade_note
 from recommendations.messages import describe
 from recommendations.models import Feed, Recommendation, SignalSwitch
 from trading.engine.adapters import jsonable
@@ -157,7 +158,7 @@ def _near_miss(feed: Feed, diagnosis: dict, bar_time, price: float) -> Recommend
                           reason=diagnosis.get("near_miss_reason") or key, context=diagnosis)
 
 
-def _alert(event: Recommendation) -> None:
+def _alert(event: Recommendation, warned: bool = False) -> None:
     feed = event.feed
     pair = _pair(feed)
     if event.kind in (Recommendation.Kind.ENTRY, Recommendation.Kind.STOP_UPDATE, Recommendation.Kind.EXIT,
@@ -168,6 +169,8 @@ def _alert(event: Recommendation) -> None:
             feed.save(update_fields=["lots_held"])
         if message is not None:
             title, body = message
+            if warned and event.kind in (Recommendation.Kind.ENTRY, Recommendation.Kind.REBALANCE):
+                title = f"GO: {title}"
             notify(AlertRule.Kind.RECOMMENDATION, title, body + "\nAdvisory only; no order placed.")
         return
     if event.kind == Recommendation.Kind.ENTRY:
@@ -312,9 +315,21 @@ def run_feed(feed: Feed, exchange_id: str, funding_config: dict) -> list[Recomme
         feed.last_run_at = timezone.now()
         feed.status_reason = ""
         feed.save()
+    # a get-ready alert was sent for this candle: confirm it (GO) or stand down
+    warned = bool(feed.heads_up_note) and feed.heads_up_bar is not None and feed.heads_up_bar == bar_time
+    acted = any(e.kind in (Recommendation.Kind.ENTRY, Recommendation.Kind.REBALANCE) for e in events)
     for event in events:
         try:
-            _alert(event)
+            _alert(event, warned)
         except Exception:
             logger.exception("alert for recommendation %s failed", event.pk)
+    if warned:
+        try:
+            if not acted:
+                note = no_trade_note(feed, bar_time, close)
+                if note:
+                    notify(AlertRule.Kind.RECOMMENDATION, *note)
+        finally:
+            feed.heads_up_note = {}
+            feed.save(update_fields=["heads_up_note"])
     return events

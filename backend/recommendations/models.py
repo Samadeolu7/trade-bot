@@ -54,6 +54,10 @@ class Feed(models.Model):
                                             on_delete=models.SET_NULL, related_name="+")
     approved_at = models.DateTimeField(null=True, blank=True)
     approved_by = models.CharField(max_length=150, blank=True)
+    # the forming candle a get-ready alert last looked at, and what it
+    # announced (empty if nothing), so the close can say GO or "no trade"
+    heads_up_bar = models.DateTimeField(null=True, blank=True)
+    heads_up_note = models.JSONField(default=dict, blank=True)
 
     # the recommended position (signal strategies)
     direction = models.CharField(max_length=5, blank=True)  # "", "long", "short"

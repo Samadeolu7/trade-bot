@@ -36,7 +36,8 @@ from alerts.models import AlertRule
 from alerts.service import PriceHistory, daily_summaries, evaluate_prices, notify
 from trading.engine.adapters import Outcome, evaluate_exposure_bot, evaluate_signal_bot, jsonable
 from recommendations.models import Feed
-from recommendations.runner import run_feed
+from recommendations.heads_up import due as heads_up_due, heads_up
+from recommendations.runner import build_feed_strategy, run_feed
 from trading.events import SYSTEM_GROUP, market_group, publish
 from trading.models import Bot, BotDecision, EquitySnapshot, LedgerEntry, Order, Position, TradingAccount
 from trading.services import books
@@ -108,6 +109,7 @@ class Engine:
         if now - self.last_bar_poll >= self.bar_poll_seconds:
             self.last_bar_poll = now
             self.poll_bars()
+        self.heads_ups()
         if now - self.last_snapshot >= self.snapshot_seconds:
             self.last_snapshot = now
             self.snapshot_equity()
@@ -232,6 +234,21 @@ class Engine:
                 logger.exception("recommendation feed %s failed", feed.name)
                 feed.status_reason = f"error: {exc}"[:300]
                 feed.save(update_fields=["status_reason"])
+
+    def heads_ups(self) -> None:
+        """Get-ready alerts ~15 minutes before a feed's candle closes, on
+        freshly fetched candles."""
+        now = dj_timezone.now()
+        for feed in Feed.objects.filter(enabled=True, halted=False):
+            bar = heads_up_due(feed, now)
+            if bar is None:
+                continue
+            try:
+                backfill_candles(self.exchange, self.exchange_id, feed.symbol, feed.timeframe, self.backfill_start)
+                heads_up(feed, self.exchange_id, build_feed_strategy, now)
+            except Exception:
+                logger.exception("heads-up for feed %s failed", feed.name)
+                Feed.objects.filter(pk=feed.pk).update(heads_up_bar=bar, heads_up_note={})  # one try per candle
 
     def run_bot(self, bot: Bot) -> BotDecision | None:
         try:

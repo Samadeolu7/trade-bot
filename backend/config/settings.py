@@ -107,6 +107,8 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
+# local time shown next to UTC in alerts (e.g. "08:00 UTC (09:00 Lagos)")
+ALERT_TIMEZONE = os.environ.get("ALERT_TIMEZONE", "Africa/Lagos")
 USE_I18N = False
 USE_TZ = True
 
