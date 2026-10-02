@@ -63,7 +63,7 @@ def test_big_move_is_a_warning_not_a_block(monkeypatch):
 
 
 def feed(**kw):
-    defaults = dict(name="donchian_1d", strategy="donchian", timeframe="1d",
+    defaults = dict(name="donchian_1d", strategy="donchian", timeframe="1d", following=True,
                     params={"donchian.channel_period": 5, "donchian.exit_channel_period": 5})
     return Feed.objects.create(**{**defaults, **kw})
 

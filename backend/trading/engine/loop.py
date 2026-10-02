@@ -239,7 +239,7 @@ class Engine:
         """Get-ready alerts ~15 minutes before a feed's candle closes, on
         freshly fetched candles."""
         now = dj_timezone.now()
-        for feed in Feed.objects.filter(enabled=True, halted=False):
+        for feed in Feed.objects.filter(enabled=True, following=True, halted=False):
             bar = heads_up_due(feed, now)
             if bar is None:
                 continue

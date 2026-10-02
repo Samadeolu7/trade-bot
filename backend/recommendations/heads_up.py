@@ -136,12 +136,32 @@ def _preview_exposure(feed: Feed, strategy, df: pd.DataFrame, close_at: datetime
     return title, body
 
 
+def _preview_position(feed: Feed, strategy, df: pd.DataFrame, close_at: datetime) -> tuple[str, str] | None:
+    """For an open call: a stop that's about to move, or a price close to
+    the stop (MT5 closes it by itself; nothing to do)."""
+    pair, price = _pair(feed), float(df["close"].iloc[-1])
+    side = "buy" if feed.direction == "long" else "sell"
+    new_stop = float(strategy.trail_stop(df, feed.direction, feed.stop))
+    if new_stop != feed.stop:
+        feed.heads_up_note = {"kind": "stop", "stop": feed.stop}
+        return (f"GET READY: {feed.name} may move {pair} Stop Loss at {when(close_at)}",
+                f"If the candle closes around the current price ({_px(price)}), the GO alert will say: move the Stop "
+                f"Loss on your {pair} {side} from {_px(feed.stop)} to about {_px(new_stop)}. Nothing to do until then.")
+    gap = abs(price - feed.stop) / price * 100
+    if gap <= NEAR_PCT:
+        feed.heads_up_note = {"kind": "near_stop"}
+        return (f"HEADS-UP: {pair} is near your {feed.name} Stop Loss",
+                f"{_pair(feed)} is {_px(price)}, {gap:.2f}% from your Stop Loss at {_px(feed.stop)}. If it's hit, MT5 "
+                f"closes the {side} by itself: nothing to do. The close at {when(close_at)} confirms either way.")
+    return None
+
+
 def heads_up(feed: Feed, exchange_id: str, build_strategy, now: datetime | None = None) -> tuple[str, str] | None:
     """Sends a get-ready alert for `feed` if one is due and a call looks
     likely. `build_strategy(feed)` builds its strategy. Returns the alert."""
     now = now or timezone.now()
     bar = due(feed, now)
-    if bar is None or not feed.enabled or feed.halted or SignalSwitch.get().halted:
+    if bar is None or not feed.enabled or not feed.following or feed.halted or SignalSwitch.get().halted:
         return None
     feed.heads_up_bar = bar  # one look per candle, whatever it shows
     feed.heads_up_note = {}
@@ -155,6 +175,8 @@ def heads_up(feed: Feed, exchange_id: str, build_strategy, now: datetime | None 
             message = _preview_exposure(feed, strategy, df, close_at)
         elif not feed.direction:
             message = _preview_signal(feed, strategy, df, close_at)
+        else:
+            message = _preview_position(feed, strategy, df, close_at)
     feed.save(update_fields=["heads_up_bar", "heads_up_note"])
     if message:
         notify(AlertRule.Kind.RECOMMENDATION, *message)
@@ -168,6 +190,11 @@ def no_trade_note(feed: Feed, bar_time, close: float) -> tuple[str, str] | None:
         return None
     pair = _pair(feed)
     close_at = bar_time + _period(feed)
+    if note.get("kind") == "near_stop":
+        return None  # the close's own alert (an exit, or nothing) says it all
+    if note.get("kind") == "stop":
+        return (f"NO CHANGE: {feed.name} {pair} Stop Loss at {when(close_at)}",
+                f"Keep your Stop Loss at {_px(feed.stop)}: it closed at {_px(close)} and the stop doesn't move this time.")
     if note.get("kind") == "entry":
         level = note.get("level")
         why = f"it closed at {_px(close)}" + (f", not past the trigger {_px(level)}" if level else "")

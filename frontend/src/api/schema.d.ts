@@ -741,6 +741,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/recommendations/feeds/{feed_id}/following": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Following
+         * @description Choose which strategies you trade on MT5; only those send alerts.
+         */
+        post: operations["recommendations_api_set_following"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/recommendations/feeds/{feed_id}/halt": {
         parameters: {
             query?: never;
@@ -1665,6 +1685,8 @@ export interface components {
             entry_time: string | null;
             /** Equity */
             equity: number;
+            /** Following */
+            following: boolean;
             /** Halt Reason */
             halt_reason: string;
             /** Halted */
@@ -1736,6 +1758,11 @@ export interface components {
              * Format: date-time
              */
             time: string;
+        };
+        /** FollowingIn */
+        FollowingIn: {
+            /** Following */
+            following: boolean;
         };
         /** FundsIn */
         FundsIn: {
@@ -3707,6 +3734,32 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["EnabledIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedOut"];
+                };
+            };
+        };
+    };
+    recommendations_api_set_following: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feed_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FollowingIn"];
             };
         };
         responses: {

@@ -12,7 +12,7 @@ CLOSE = FORMING + timedelta(hours=4)
 
 
 def feed(**kw):
-    defaults = dict(name="donchian_4h", strategy="donchian", timeframe="4h",
+    defaults = dict(name="donchian_4h", strategy="donchian", timeframe="4h", following=True,
                     params={"donchian.channel_period": 5, "donchian.exit_channel_period": 5})
     return Feed.objects.create(**{**defaults, **kw})
 
@@ -85,3 +85,36 @@ def test_exposure_feed_warns_of_a_likely_resize(owner):
     message = heads_up(f, "binance", build_feed_strategy, forming + timedelta(hours=4, minutes=-12))
     if message is not None:  # depends on the ensemble's warm-up on 40 bars
         assert message[0].startswith("GET READY: ens may resize BTCUSD")
+
+
+def test_only_followed_feeds_alert(owner):
+    import json
+
+    from django.test import Client
+
+    rule(owner)
+    make_candles([100.0] * 70 + [110.0], timeframe="4h")
+    f = feed(following=False)
+    assert heads_up(f, "binance", build_feed_strategy, CLOSE - timedelta(minutes=12)) is None
+    events = run_feed(f, "binance", {})
+    assert [e.kind for e in events] == ["entry"]  # still tracked
+    assert not AlertEvent.objects.exists()  # but silent
+
+    client = Client()
+    client.force_login(owner)
+    r = client.post(f"/api/recommendations/feeds/{f.pk}/following", json.dumps({"following": True}),
+                    content_type="application/json")
+    assert r.status_code == 200 and r.json()["following"] is True
+
+
+def test_open_call_gets_a_heads_up_before_its_stop_moves(owner):
+    rule(owner)
+    # in a long from 100 with stop 95; a rising forming candle lifts the 5-bar low channel
+    make_candles([100.0] * 66 + [101.0, 102.0, 103.0, 104.0, 105.0], timeframe="4h")
+    f = feed(direction="long", entry_price=100.0, entry_time=START, stop=95.0)
+    message = heads_up(f, "binance", build_feed_strategy, CLOSE - timedelta(minutes=12))
+    assert message and message[0].startswith("GET READY: donchian_4h may move BTCUSD Stop Loss")
+    assert "from 95.00 to about" in message[1]
+    events = run_feed(Feed.objects.get(pk=f.pk), "binance", {})
+    assert "stop_update" in [e.kind for e in events]
+    assert AlertEvent.objects.order_by("-id").first().title.startswith("GO: MT5: move BTCUSD Stop Loss")

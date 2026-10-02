@@ -18,6 +18,9 @@ class Feed(models.Model):
     fee = models.FloatField(default=0.0)
     slippage = models.FloatField(default=0.0003)
     enabled = models.BooleanField(default=True)
+    # whether you trade this feed on MT5: only followed feeds send alerts;
+    # the rest are still tracked and shown in the app
+    following = models.BooleanField(default=False)
 
     # MT5 sizing, so alerts can say exactly how many lots to trade: your
     # account balance for this feed (USD) and the symbol's contract spec as

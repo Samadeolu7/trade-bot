@@ -240,6 +240,16 @@ function Feeds() {
   })
   const [sizing, setSizing] = useState<Feed | null>(null)
   const [halting, setHalting] = useState<Feed | null>(null)
+  const follow = useMutation({
+    mutationFn: (f: Feed) =>
+      unwrap(
+        client.POST('/api/recommendations/feeds/{feed_id}/following', {
+          params: { path: { feed_id: f.id } },
+          body: { following: !f.following },
+        }),
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.feeds }),
+  })
   const approve = useMutation({
     mutationFn: (f: Feed) =>
       unwrap(client.POST('/api/recommendations/feeds/{feed_id}/approve', { params: { path: { feed_id: f.id } }, body: { note: '' } })),
@@ -268,6 +278,7 @@ function Feeds() {
       <table className="data">
         <thead>
           <tr>
+            <th title="Only strategies you follow send MT5 alerts">Follow</th>
             <th>Strategy</th>
             <th>Call now</th>
             <th className="r">Stop</th>
@@ -282,6 +293,24 @@ function Feeds() {
         <tbody>
           {data.map((f) => (
             <tr key={f.id} className={f.enabled ? '' : 'text-muted'}>
+              <td>
+                {me?.role === 'owner' ? (
+                  <button
+                    onClick={() => follow.mutate(f)}
+                    aria-pressed={f.following}
+                    className={`rounded-md border px-2 py-1 text-[12px] font-semibold ${
+                      f.following ? 'border-up bg-up text-white' : 'border-line-strong text-ink-2 hover:bg-sunken'
+                    }`}
+                    title={f.following ? 'You trade this on MT5: alerts on. Click to stop following.' : 'Follow to get its MT5 alerts'}
+                  >
+                    {f.following ? '✓ Following' : 'Follow'}
+                  </button>
+                ) : f.following ? (
+                  <span className="text-up">✓ Following</span>
+                ) : (
+                  <span className="text-muted">—</span>
+                )}
+              </td>
               <td>
                 <div className="font-semibold">{f.name}</div>
                 <div className="text-[12px] text-muted">
@@ -359,7 +388,7 @@ function Feeds() {
           ))}
         </tbody>
       </table>
-      <ErrorText error={toggle.error ?? approve.error} />
+      <ErrorText error={toggle.error ?? approve.error ?? follow.error} />
       {sizing && <SizingDialog feed={sizing} onClose={() => setSizing(null)} />}
       {halting && <HaltDialog feed={halting} onClose={() => setHalting(null)} />}
     </div>
@@ -474,8 +503,9 @@ export default function Recommendations() {
       <div>
         <h1 className="text-[20px] font-bold">Recommendations</h1>
         <p className="max-w-prose text-[13px] text-ink-2">
-          Calls for your own trading on MT5. Nothing here places an order. Exits are judged on each completed candle, so
-          keep your own stop in MT5 where the call says.
+          Calls for your own trading on MT5. Nothing here places an order. Only strategies you <b>follow</b> send alerts:
+          a get-ready about 15 minutes before a likely call, then GO (or no trade) when the candle closes. Exits are judged
+          on each completed candle, so keep your own stop in MT5 where the call says.
         </p>
       </div>
       <SignalSwitch />

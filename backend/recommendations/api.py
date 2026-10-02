@@ -22,6 +22,8 @@ class FeedOut(Schema):
     timeframe: str
     symbol: str
     enabled: bool
+    # you trade this one on MT5: only followed feeds send alerts
+    following: bool
     kind: str  # "position" | "exposure"
     direction: str
     entry_price: float | None
@@ -69,7 +71,7 @@ def _feed_out(feed: Feed, prices: dict) -> dict:
     d = feed.last_diagnosis or {}
     return {
         "id": feed.pk, "name": feed.name, "strategy": feed.strategy, "timeframe": feed.timeframe,
-        "symbol": feed.symbol, "enabled": feed.enabled,
+        "symbol": feed.symbol, "enabled": feed.enabled, "following": feed.following,
         "kind": "exposure" if feed.strategy == "donchian_ensemble" else "position",
         "direction": feed.direction, "entry_price": feed.entry_price, "entry_time": feed.entry_time,
         "stop": feed.stop, "take_profit": feed.take_profit, "open_pnl_pct": pnl, "weight": feed.weight,
@@ -104,6 +106,21 @@ def set_enabled(request, feed_id: int, payload: EnabledIn):
     feed.enabled = payload.enabled
     feed.save(update_fields=["enabled"])
     audit("recommendations.enabled", request=request, target=f"feed:{feed.name}", enabled=payload.enabled)
+    return _feed_out(feed, {})
+
+
+class FollowingIn(Schema):
+    following: bool
+
+
+@router.post("/feeds/{feed_id}/following", response=FeedOut)
+def set_following(request, feed_id: int, payload: FollowingIn):
+    """Choose which strategies you trade on MT5; only those send alerts."""
+    require_owner(request)
+    feed = _get_feed(feed_id)
+    feed.following = payload.following
+    feed.save(update_fields=["following"])
+    audit("recommendations.following", request=request, target=f"feed:{feed.name}", following=payload.following)
     return _feed_out(feed, {})
 
 

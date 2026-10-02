@@ -160,6 +160,8 @@ def _near_miss(feed: Feed, diagnosis: dict, bar_time, price: float) -> Recommend
 
 def _alert(event: Recommendation, warned: bool = False) -> None:
     feed = event.feed
+    if not feed.following:
+        return  # tracked and shown in the app, but you don't trade it
     pair = _pair(feed)
     if event.kind in (Recommendation.Kind.ENTRY, Recommendation.Kind.STOP_UPDATE, Recommendation.Kind.EXIT,
                       Recommendation.Kind.REBALANCE):
@@ -169,7 +171,7 @@ def _alert(event: Recommendation, warned: bool = False) -> None:
             feed.save(update_fields=["lots_held"])
         if message is not None:
             title, body = message
-            if warned and event.kind in (Recommendation.Kind.ENTRY, Recommendation.Kind.REBALANCE):
+            if warned:
                 title = f"GO: {title}"
             notify(AlertRule.Kind.RECOMMENDATION, title, body + "\nAdvisory only; no order placed.")
         return
@@ -235,9 +237,10 @@ def halt_feed(feed: Feed, reason: str, bar_time=None, price: float | None = None
         feed.status_reason = f"paused: {reason}"[:300]
         feed.save(update_fields=["halted", "halt_reason", "halted_at", "status_reason"])
     try:
-        notify(AlertRule.Kind.RECOMMENDATION, f"SIGNALS PAUSED: {feed.name} ({_pair(feed)} {feed.timeframe})",
-               f"Reason: {reason}.\n{_open_position_note(feed)}\n"
-               "No new alerts from this feed until you check and press Resume on the Recommendations page.")
+        if feed.following:
+            notify(AlertRule.Kind.RECOMMENDATION, f"SIGNALS PAUSED: {feed.name} ({_pair(feed)} {feed.timeframe})",
+                   f"Reason: {reason}.\n{_open_position_note(feed)}\n"
+                   "No new alerts from this feed until you check and press Resume on the Recommendations page.")
     except Exception:
         logger.exception("pause alert for feed %s failed", feed.name)
     return event
@@ -316,19 +319,22 @@ def run_feed(feed: Feed, exchange_id: str, funding_config: dict) -> list[Recomme
         feed.status_reason = ""
         feed.save()
     # a get-ready alert was sent for this candle: confirm it (GO) or stand down
-    warned = bool(feed.heads_up_note) and feed.heads_up_bar is not None and feed.heads_up_bar == bar_time
-    acted = any(e.kind in (Recommendation.Kind.ENTRY, Recommendation.Kind.REBALANCE) for e in events)
+    note = feed.heads_up_note if feed.heads_up_bar is not None and feed.heads_up_bar == bar_time else {}
+    announced = {"entry": Recommendation.Kind.ENTRY, "resize": Recommendation.Kind.REBALANCE,
+                 "stop": Recommendation.Kind.STOP_UPDATE}.get(note.get("kind"))
+    warned = bool(note)
+    acted = any(e.kind == announced for e in events)
     for event in events:
         try:
-            _alert(event, warned)
+            _alert(event, warned and event.kind == announced)
         except Exception:
             logger.exception("alert for recommendation %s failed", event.pk)
     if warned:
         try:
-            if not acted:
-                note = no_trade_note(feed, bar_time, close)
-                if note:
-                    notify(AlertRule.Kind.RECOMMENDATION, *note)
+            if not acted and feed.following:
+                stand_down = no_trade_note(feed, bar_time, close)
+                if stand_down:
+                    notify(AlertRule.Kind.RECOMMENDATION, *stand_down)
         finally:
             feed.heads_up_note = {}
             feed.save(update_fields=["heads_up_note"])

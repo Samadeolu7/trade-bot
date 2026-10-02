@@ -218,7 +218,8 @@ def daily_summaries(now: datetime | None = None) -> int:
         feeds = Feed.objects.filter(enabled=True).order_by("name")
         if feeds:
             lines.append("MT5 recommendations:")
-            lines.extend(f"  {feed.name}: {_feed_state(feed)}" for feed in feeds)
+            lines.extend(f"  {feed.name}{' (you follow this)' if feed.following else ''}: {_feed_state(feed)}"
+                         for feed in feeds)
         fire(rule, f"Daily summary {now:%Y-%m-%d}", "\n".join(lines) or "No accounts to report on.", now)
         fired += 1
     return fired

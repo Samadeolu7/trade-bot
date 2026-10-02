@@ -1226,6 +1226,10 @@
             "title": "Equity",
             "type": "number"
           },
+          "following": {
+            "title": "Following",
+            "type": "boolean"
+          },
           "halt_reason": {
             "title": "Halt Reason",
             "type": "string"
@@ -1370,6 +1374,7 @@
           "timeframe",
           "symbol",
           "enabled",
+          "following",
           "kind",
           "direction",
           "entry_price",
@@ -1483,6 +1488,19 @@
           "time"
         ],
         "title": "FillOut",
+        "type": "object"
+      },
+      "FollowingIn": {
+        "properties": {
+          "following": {
+            "title": "Following",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "following"
+        ],
+        "title": "FollowingIn",
         "type": "object"
       },
       "FundsIn": {
@@ -5802,6 +5820,54 @@
           }
         ],
         "summary": "Set Enabled",
+        "tags": [
+          "recommendations"
+        ]
+      }
+    },
+    "/api/recommendations/feeds/{feed_id}/following": {
+      "post": {
+        "description": "Choose which strategies you trade on MT5; only those send alerts.",
+        "operationId": "recommendations_api_set_following",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feed_id",
+            "required": true,
+            "schema": {
+              "title": "Feed Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FollowingIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "Set Following",
         "tags": [
           "recommendations"
         ]
