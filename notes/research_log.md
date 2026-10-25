@@ -389,7 +389,53 @@ here, since stacking them would conflate which mechanism did the work.
   top-line Sharpe/DD numbers look similar.
 - Trial budget: 10 (one exit rule, two trigger variants, not a new search).
 
-All three hypotheses are open; no job has been run against any of them yet.
-Next step when ready to spend budget: register all three in the app (so
-trials count against them) and run CRT's existing untested backtest as a
-free sanity check first.
+All three were registered live (hypothesis A = #2, B = #3, C = #4) and run
+the same day.
+
+### Results (jobs #42, #45–47): FAIL on all three
+
+A fair comparison needed one correction first: B/C's pass criteria above
+cite the bare ensemble's Sharpe from the original train/test-split research
+(BTC 0.90), not this same anchored-walk-forward methodology. Job #47 reruns
+the bare ensemble (bars_per_day 6) through the identical 9 folds as the
+proper baseline — hosted under hypothesis #1 since it's that same strategy,
+not a new idea.
+
+| Run | OOS Sharpe | Max DD | Positive folds | Deflated Sharpe prob. |
+|---|---|---|---|---|
+| Baseline: bare donchian_ensemble BTC 4h (job #47) | 0.84 | -14.73% | 4/9 | n/a (hyp #1) |
+| A — failed_breakout standalone, BTC 4h (job #42) | **-1.16** | -11.49% | 1/9 | 0.0014 |
+| B — fb veto filter, BTC 4h (job #45) | 0.84 (tied) | -14.74% | 4/9 (tied) | 0.9571 |
+| C — fb early-exit override, BTC 4h (job #46) | 0.81 (worse) | -15.26% (worse) | 4/9 (tied) | 0.9409 |
+
+- **A: FAIL, decisively.** Loses money outright (-9.4% total return over the
+  stitched OOS span) and the deflated Sharpe probability (0.0014) is nowhere
+  close to the 0.95 bar. No ETH cross-check run — not worth the budget on a
+  result this clear.
+- **B: FAIL.** Every one of the 9 folds picked the loosest `veto_lookback=15`
+  on train, so the filter almost never actually blocked a trade — the
+  equity curve is nearly identical to the bare baseline, 0.01pp *worse* on
+  drawdown. Fails both the corrected baseline comparison (needs to beat
+  0.84, ties it) and its own original absolute bar (0.90). Its own deflated
+  Sharpe passes (0.9571) — that only certifies the strategy's Sharpe is
+  non-zero, not that it beats doing nothing.
+- **C: FAIL, and on its own specific premise.** The entire point was limiting
+  drawdown on a reversal; drawdown got *worse* (-15.26% vs -14.73%), not
+  better. Also worse on Sharpe, return, and its own deflated Sharpe
+  (0.9409 < 0.95). No ETH cross-check run on either B or C — neither
+  cleared its BTC bar, so the cross-check budget wasn't spent.
+- Budget used: 6 of the research key's 100 job-creations; hypothesis trial
+  budgets barely touched (A 9/20, B 3/10, C 2/10).
+- Conclusion left to the owner (hypotheses are concluded by a person, and a
+  research key can't conclude() one by design). My reading: all three
+  failed. The 4-step failed-breakout pattern, at least in this mechanical
+  form, has no edge on BTC/USDT 4h standalone, as a veto, or as an exit
+  override.
+
+**Infra bug found along the way, not fixed here:** `Experiment.strategy_label`
+is a Postgres `varchar(80)`, built server-side as
+`f"{strategy_name} {param=val,...}"`. The two wrapper strategy names here
+(27/25 chars) combined with more than ~2 swept/override params overflowed it
+outright (`value too long for type character varying(80)`), failing jobs
+#43/#44 before the retry. Needs a migration widening that column before any
+future job combines a long strategy name with several params.
