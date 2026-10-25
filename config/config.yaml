@@ -79,6 +79,23 @@ strategy:
     min_rr: 1.0               # skip setups with less reward:risk than this to the target
     stop_buffer_pct: 0.0      # extra room past the sweep wick, as a fraction of price
     trend_ema_period: 0       # 0 = off; else longs only above / shorts only below this EMA ("HTF alignment")
+  failed_breakout:             # hypothesis A (reversal/failed-breakout) — pre-registered 2026-10-25, untested
+    swing_window: 5            # bars on each side to confirm a fractal swing high/low ("location")
+    reclaim_window: 5          # max bars after the break to accept a close back inside ("reclaim")
+    follow_through_window: 10  # max bars after the reclaim to accept a break of prior structure ("follow-through")
+    stop_buffer_pct: 0.0       # extra room past the sweep wick, as a fraction of price
+    atr_period: 14             # trailing-stop ATR, same mechanism as market_structure/donchian
+    atr_mult: 2.0
+  failed_breakout_filter:      # hypothesis B (reversal/failed-breakout-filter) — pre-registered 2026-10-25, untested
+    swing_window: 5
+    reclaim_window: 5
+    follow_through_window: 10
+    veto_lookback: 10          # bars after a bearish failed breakout during which new/added exposure is blocked
+  failed_breakout_exit:        # hypothesis C (reversal/failed-breakout-exit) — pre-registered 2026-10-25, untested
+    swing_window: 5
+    reclaim_window: 5
+    follow_through_window: 10
+    exit_trigger: follow_through  # reclaim | follow_through — how early the override closes the position
   pyramid:                    # research option for signal strategies, off by default (spec Section 8)
     max_adds: 0               # extra units a trade may add on fresh same-direction entry signals; 0 = one position, as every test so far
     add_step_pct: 0.0         # only add once price has moved this fraction in the trade's favour since the last fill
