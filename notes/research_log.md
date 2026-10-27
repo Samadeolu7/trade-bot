@@ -277,3 +277,54 @@ variants) before any result was seen.
   demo only; don't fund real money on this evidence. A new idea (e.g. a
   pre-registered donchian + ensemble blend, or a 2022-style bear filter)
   needs its own hypothesis and budget.
+
+## 2026-10-27 — Intraday (day-trading) hypotheses #2–#5 (pre-registered)
+
+Written before any intraday data was downloaded or any result seen.
+
+**Owner's constraint:** can act 08:00–22:00 Lagos (07:00–21:00 UTC) on
+weekdays, any time on weekends. Every trade is entered and closed inside
+that window: weekdays flat by 21:00 UTC, weekends flat by 23:45 UTC.
+Positions never carry overnight (no swap).
+
+**Data and method (all four):**
+- BTC/USDT 15-minute candles from 2020-01-01 to 2026-02-28. Data on or
+  after the holdout (2026-03-01) is not downloaded.
+- Entries at a 15m close; stops fill at the stop price, or at the open if
+  price gapped through it. 1x notional per trade, long and short (CFD).
+- Costs per round trip: 0.02%, 0.05%, 0.10% of price. Judged at 0.05%
+  until the Exness BTCUSDc spread is known.
+- Anchored walk-forward, 6-month folds from 2022-01-01. Within a
+  hypothesis, each fold uses the variant with the best Sharpe before it.
+- Deflated Sharpe counts all 16 intraday variants (family "intraday").
+
+**Pass bar for each hypothesis, at 0.05% round trip:**
+- out-of-sample Sharpe >= 0.8;
+- at least 60% of folds positive;
+- deflated Sharpe probability >= 0.95;
+- at least 100 out-of-sample trades;
+- still profitable at 0.10%.
+
+**#2 US-open range breakout (4 variants).** Weekdays only.
+- Range: the high/low of 13:30–14:00 or 13:30–14:30 UTC.
+- Entry: the first 15m close beyond the range, before 19:00 UTC.
+- Stop: the opposite side of the range, or the range midpoint.
+- Exit: at the stop, or at 21:00 UTC.
+
+**#3 Volatility breakout, Williams-style (6 variants).**
+- Day anchor: the 07:00 UTC open. Range: high minus low of the prior 24h.
+- Long when price closes >= open + k x range; short is the mirror image
+  (in the two-sided variants). k in {0.3, 0.5, 0.7}; long-only or both.
+- Stop at the day open; exit at the end of the window.
+
+**#4 Intraday momentum (2 variants).**
+- Formation return: from 07:00 UTC (or 00:00 UTC) to 19:00 UTC.
+- Trade its sign from 19:00 to 21:00 UTC (weekdays), or 21:45 to 23:45
+  (weekends).
+- No stop beyond the time exit.
+
+**#5 Overreaction fade (4 variants).**
+- Trigger: a 1-hour return beyond k x the 30-day standard deviation of
+  1-hour returns. k in {2.5, 3}; long-only (fade drops) or both sides.
+- Trade against the move. Stop at 1x the move's size beyond the entry.
+- Exit after 4 hours, or at the end of the window.
