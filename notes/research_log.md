@@ -559,3 +559,32 @@ Each strategy+timeframe is judged on its own with fixed settings. The
 deflated Sharpe counts all 42 intraday variants tried so far (16 + 26).
 
 **Pass bar:** same as #2–#5.
+
+### Result #6: every existing strategy FAILS as a day trade
+
+Best out-of-sample Sharpe at the owner's realistic round-trip cost
+(~0.01–0.02%: Exness BTCUSDc spread measured at $6.40, about 0.008%, at
+06:08 UTC), with the 0.05% figure in brackets:
+
+- **1h, best:** ensemble 0.58 (0.34), donchian 0.54 (0.26), NATR regime
+  0.46 (0.25), ADX regime 0.33, failed breakout 0.27. All are well below
+  the 0.8 bar and below #2's US-open breakout (0.97 at 0.02%). Every
+  deflated Sharpe is 0.00.
+- **15m:** nothing positive after costs except the ensemble's 0.31 at
+  0.02%. Shorter bars make every trend strategy worse.
+- **Losing before costs, on both timeframes:** ema_cross, rsi_bb,
+  market_structure, vol_expansion, crt, failed_breakout (15m).
+  failed_breakout on 1h: 157 trades in 6 years, -0.07% gross per trade.
+- **multi_timeframe made no trades** on 15m or 1h with its defaults (the
+  higher-timeframe lookback isn't scaled for short bars), so it can't be
+  judged as-is. Not retuned, per the pre-registration.
+- ensemble_fb_filter is identical to the plain ensemble at these bar
+  sizes: the filter never fires.
+
+**Conclusion:** the strategies built for 4h/1d don't carry over to day
+trading. Their signals were designed for multi-day trends, and cutting
+them off every evening removes the part of the move that pays. The only
+intraday candidate remains #2 (US-open range breakout), which still
+fails its deflated Sharpe and 0.10% robustness checks. It goes to a
+forward paper test if the owner wants one; no money until that has
+months of results.
