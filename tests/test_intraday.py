@@ -48,3 +48,20 @@ def test_momentum_follows_the_day_and_costs_reduce_returns():
     assert len(trades) == 1 and trades[0].direction == 1
     days = pd.DatetimeIndex([pd.Timestamp("2024-01-03", tz="UTC")])
     assert daily_returns(trades, days, 0.0005).iloc[0] < daily_returns(trades, days, 0.0).iloc[0]
+
+
+def test_session_trades_are_flat_by_the_window_end():
+    import yaml
+
+    from bot.research.intraday import session_signal_trades
+    from bot.strategy.registry import build_strategy
+
+    cfg = yaml.safe_load(open("config/config.yaml"))["strategy"]
+    closes = [100.0] * 60 + [100.0 + i for i in range(36)]  # a breakout from 15:00
+    df = frame(day="2024-01-03", closes=closes * 3)
+    df.index = pd.date_range("2024-01-03", periods=len(df), freq="15min", tz="UTC")
+    trades = session_signal_trades(df, build_strategy("donchian", {**cfg, "donchian": {**cfg["donchian"],
+                                                                       "channel_period": 5, "exit_channel_period": 5}}))
+    for t in trades:
+        start, end = window(t.entry_time.normalize())
+        assert start <= t.entry_time < end and t.exit_time <= end and t.exit_time.normalize() == t.entry_time.normalize()

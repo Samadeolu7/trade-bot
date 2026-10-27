@@ -178,3 +178,84 @@ def daily_returns(trades: list[DayTrade], days: pd.DatetimeIndex, cost_rt: float
     for t in trades:
         s[t.exit_time.normalize()] += t.gross() - cost_rt
     return s
+
+
+# --- existing strategies as day trades (hypothesis #6) ----------------------------------
+
+
+def _windows(index: pd.DatetimeIndex) -> tuple[np.ndarray, np.ndarray]:
+    """Per bar: whether a new position may open on it (it closes before the
+    window closes), and whether it's the window's last bar (forced exit at
+    its close). Works for 15m and 1h bars."""
+    days = index.normalize()
+    weekend = days.weekday >= 5
+    start = days + pd.to_timedelta(np.where(weekend, 0, 7 * 60), unit="m")
+    close_at = days + pd.to_timedelta(np.where(weekend, 23 * 60 + 45, 21 * 60), unit="m")
+    span = (index[1] - index[0]) if len(index) > 1 else BAR
+    bar_close = index + span
+    inside = index >= start
+    can_open = np.asarray(inside & (bar_close < close_at))
+    last = np.asarray(inside & (bar_close >= close_at) & (index < close_at))
+    return can_open, last
+
+
+def session_signal_trades(df: pd.DataFrame, strategy) -> list[DayTrade]:
+    """A signal strategy's own entries, stops, trailing stops and targets,
+    restricted to the owner's window and flat at each window's end."""
+    signals = strategy.entry_signals(df)
+    lookback = strategy.min_lookback
+    o, h, l, c = (df[k].to_numpy(dtype=float) for k in ("open", "high", "low", "close"))
+    sdir = signals["direction"].to_numpy(dtype=object)
+    sstop = signals["stop_loss"].to_numpy(dtype=float)
+    stp = signals["take_profit"].to_numpy(dtype=float)
+    can_open, last = _windows(df.index)
+    out, pos = [], None
+    for i in range(lookback, len(df)):
+        if pos is not None:
+            win = df.iloc[max(0, i - lookback + 1): i + 1]
+            pos["stop"] = pos["owner"].trail_stop(win, pos["direction"], pos["stop"])
+            d = 1 if pos["direction"] == "long" else -1
+            exit_px, why = None, None
+            if d > 0 and l[i] <= pos["stop"]:
+                exit_px, why = min(o[i], pos["stop"]), "stop"
+            elif d < 0 and h[i] >= pos["stop"]:
+                exit_px, why = max(o[i], pos["stop"]), "stop"
+            elif pos["tp"] is not None and ((d > 0 and h[i] >= pos["tp"]) or (d < 0 and l[i] <= pos["tp"])):
+                exit_px, why = pos["tp"], "take_profit"
+            elif last[i]:
+                exit_px, why = c[i], "time"
+            if exit_px is not None:
+                out.append(DayTrade(pos["time"], df.index[i], d, pos["entry"], float(exit_px), why))
+                pos = None
+            continue
+        if can_open[i] and isinstance(sdir[i], str) and sdir[i] in ("long", "short") and not np.isnan(sstop[i]):
+            owner = signals["strategy"].iloc[i] if "strategy" in signals.columns else strategy
+            pos = {"direction": sdir[i], "entry": c[i], "stop": float(sstop[i]), "time": df.index[i],
+                   "tp": None if np.isnan(stp[i]) else float(stp[i]), "owner": owner}
+    return out
+
+
+def session_exposure_returns(df: pd.DataFrame, strategy, cost_rt: float) -> tuple[pd.Series, list[pd.Timestamp]]:
+    """An exposure strategy's target weight, held only inside the window
+    (entered at its start, flat at its end). Returns net return per
+    calendar day and the entry times (flat -> invested)."""
+    w = strategy.target_weights(df).fillna(0.0).to_numpy(dtype=float)
+    c = df["close"].to_numpy(dtype=float)
+    can_open, last = _windows(df.index)
+    thr = getattr(strategy, "rebalance_threshold", 0.0)
+    day = df.index.normalize()
+    rets = np.zeros(len(df))
+    entries, held = [], 0.0
+    for i in range(1, len(df)):
+        r = held * (c[i] / c[i - 1] - 1)
+        target = w[i] if can_open[i] else 0.0
+        if last[i] or not can_open[i]:
+            target = 0.0
+        if (held == 0.0) != (target == 0.0) or abs(target - held) > thr:
+            if held == 0.0 and target > 0.0:
+                entries.append(df.index[i])
+            r -= abs(target - held) * cost_rt / 2
+            held = target
+        rets[i] = r
+    daily = pd.Series(rets, index=day).groupby(level=0).sum()
+    return daily, entries
