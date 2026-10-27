@@ -1,6 +1,13 @@
 # the web platform; the strategy library's own needs are in ../requirements.txt
 Django>=5.2,<6
 django-ninja>=1.7,<2
+# pinned exactly: django-ninja doesn't pin it, so an unpinned pydantic lets a
+# fresh CI install silently pick up a newer release at any time. 2.14.0
+# changed how Decimal fields render in generated JSON schema (dropped the
+# regex-pattern string variant), which broke the "API types are up to date"
+# check against committed openapi.json/schema.d.ts without any app code
+# changing. Bump deliberately, together with regenerating those files.
+pydantic==2.13.5
 django-otp>=1.7,<2
 channels>=4.3,<5
 channels-redis>=4.3,<5

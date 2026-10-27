@@ -49,7 +49,11 @@ class Experiment(models.Model):
     created_at = models.DateTimeField(db_index=True)
     kind = models.CharField(max_length=20)
     strategy = models.CharField(max_length=40, db_index=True)
-    strategy_label = models.CharField(max_length=80)
+    # a strategy name plus every swept/overridden "key=value" pair, built by
+    # research.jobs.variants() — 80 silently overflowed once a longer
+    # wrapper strategy name (e.g. donchian_ensemble_fb_filter) was combined
+    # with more than ~2 params (2026-10-25 postmortem, notes/research_log.md)
+    strategy_label = models.CharField(max_length=200)
     symbol = models.CharField(max_length=30)
     timeframe = models.CharField(max_length=10)
     window_start = models.CharField(max_length=40, blank=True)

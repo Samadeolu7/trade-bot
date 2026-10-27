@@ -14,7 +14,12 @@ from bot.strategy.base import Strategy
 from bot.strategy.crt import CandleRangeTheoryStrategy
 from bot.strategy.donchian import DonchianBreakoutStrategy
 from bot.strategy.donchian_ensemble import DonchianEnsembleStrategy
+from bot.strategy.donchian_ensemble_failed_breakout import (
+    DonchianEnsembleFailedBreakoutExitStrategy,
+    DonchianEnsembleFailedBreakoutFilterStrategy,
+)
 from bot.strategy.ema_cross import EmaCrossStrategy
+from bot.strategy.failed_breakout import FailedBreakoutStrategy
 from bot.strategy.flat import FlatStrategy
 from bot.strategy.funding_filter import FundingFilteredStrategy
 from bot.strategy.long_only import LongOnlyStrategy
@@ -92,6 +97,21 @@ STRATEGY_CATALOG: dict[str, StrategyInfo] = {
             "crt", "signal", True,
             "Candle Range Theory: sweep of the prior candle's range, close back inside.",
             ("crt", "pyramid"),
+        ),
+        StrategyInfo(
+            "failed_breakout", "signal", True,
+            "Location/break/reclaim/follow-through: a swept swing level that fails and reverses.",
+            ("failed_breakout", "pyramid"),
+        ),
+        StrategyInfo(
+            "donchian_ensemble_fb_filter", "exposure", False,
+            "Donchian ensemble that stays flat instead of adding exposure during an active bearish failed breakout.",
+            ("donchian_ensemble", "failed_breakout_filter"),
+        ),
+        StrategyInfo(
+            "donchian_ensemble_fb_exit", "exposure", False,
+            "Donchian ensemble that closes an open position early on a bearish failed breakout against it.",
+            ("donchian_ensemble", "failed_breakout_exit"),
         ),
     ]
 }
@@ -176,6 +196,14 @@ def _build_unwrapped(
         return CandleRangeTheoryStrategy(strategy_config.get("crt", {}))
     if name == "donchian_ensemble":
         return DonchianEnsembleStrategy(strategy_config.get("donchian_ensemble", {}))
+    if name == "failed_breakout":
+        return FailedBreakoutStrategy(strategy_config.get("failed_breakout", {}))
+    if name == "donchian_ensemble_fb_filter":
+        base = DonchianEnsembleStrategy(strategy_config.get("donchian_ensemble", {}))
+        return DonchianEnsembleFailedBreakoutFilterStrategy(base, strategy_config.get("failed_breakout_filter", {}))
+    if name == "donchian_ensemble_fb_exit":
+        base = DonchianEnsembleStrategy(strategy_config.get("donchian_ensemble", {}))
+        return DonchianEnsembleFailedBreakoutExitStrategy(base, strategy_config.get("failed_breakout_exit", {}))
     if name == "funding_filtered":
         # base_strategy/high_threshold/low_threshold are config-driven (same
         # pattern as regime_switched's trend_strategy), not separate

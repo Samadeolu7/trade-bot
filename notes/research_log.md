@@ -278,6 +278,168 @@ variants) before any result was seen.
   pre-registered donchian + ensemble blend, or a 2022-style bear filter)
   needs its own hypothesis and budget.
 
+## 2026-10-25 — Failed-breakout reversal (location/break/reclaim/follow-through), pre-registered
+
+Online research (no peer-reviewed source found; synthesized from practitioner
+guides) converges on a 4-step mechanical definition: **location** (price at a
+pre-marked swing level, marked before the move) → **break** (price trades
+beyond it) → **reclaim** (a *close* back inside, not a wick) → **follow-
+through** (price holds and breaks an intervening swing point the other way).
+Every source agrees location+break is "only an alert" — reclaim+follow-
+through is the actual confirmation. No source publishes a tested bar-count
+window, volume filter, or entry/stop/target rule; those are fixed below,
+before any run, so the design can't drift toward results.
+
+The repo already has both ends of this idea, untested:
+[crt.py](../bot/strategy/crt.py) is break+reclaim with no location filter and
+no follow-through wait (entry at the reclaim bar's close); it's a free,
+already-coded reference point worth running through the existing
+walk-forward harness before any new file is written.
+[market_structure.py](../bot/strategy/market_structure.py) has a confirmed-
+swing-fractal location+break detector, currently wired to continuation
+(retest holds) rather than reversal (reclaim fails). Both hypotheses below
+reuse that detector's swing-fractal logic rather than a new one.
+
+**Shared, fixed definitions for both hypotheses:**
+- Location: a confirmed swing high/low, `swing_window` = 5 bars either side
+  (market_structure's existing default).
+- Break: first close beyond that level after the swing is confirmed.
+- Reclaim: a close back on the origin side of the level, within
+  `reclaim_window` = 5 bars of the break bar. A wick alone doesn't count.
+- Follow-through: within `follow_through_window` = 10 bars after the
+  reclaim bar, a close beyond the nearest confirmed swing point in the new
+  (reversed) direction.
+
+### Hypothesis A — standalone strategy, family `reversal/failed-breakout`
+
+- Statement: the 4-step failed-breakout pattern above, traded as its own
+  strategy (entry at follow-through confirmation, stop just beyond the
+  sweep wick, ATR(14) × 2 trailing stop — the same exit mechanism as
+  market_structure/donchian, so the comparison isn't confounded by exit
+  style), has a standalone edge on BTC/USDT 4h.
+- Runs: BTC/USDT 4h (candidate), ETH/USDT 4h (cross-check). Same train
+  (2020-2023) / test (2024-01-01..holdout) windows and cost model as every
+  other entry in this log. Holdout (2026-03-01 on) untouched.
+- Grid (chosen by **train only**, rule 1 from the first search above):
+  `reclaim_window` ∈ {3, 5, 8} × `follow_through_window` ∈ {5, 10, 15}, 9
+  cells, within the 20-trial budget.
+- Pass criteria: test Sharpe ≥ 0.8 (hypothesis #1's bar, not borrowed from
+  the donchian family), positive test return on the ETH cross-check,
+  deflated Sharpe probability ≥ 0.95 counting trials in this family only
+  (starts at 0), ≥ half of 6-month anchored walk-forward folds positive,
+  test max drawdown no worse than -20%.
+- Trial budget: 20.
+
+### Hypothesis B — filter/veto on donchian_ensemble, family `reversal/failed-breakout-filter`
+
+- Statement: skipping a donchian_ensemble BTC/USDT 4h entry when a
+  failed-breakout pattern (same definitions above) completed *against* that
+  entry's direction within `veto_lookback` bars improves the bare
+  ensemble's risk-adjusted return.
+- Veto rule: at each ensemble entry signal, look back `veto_lookback` bars;
+  if a failed-breakout follow-through fired opposite to the proposed entry
+  in that window, stay flat this bar instead.
+- Runs: BTC/USDT 4h (candidate), ETH/USDT 4h (cross-check). Same
+  train/test windows, holdout untouched.
+- Grid: `veto_lookback` ∈ {5, 10, 15}, chosen by train only.
+- Pass criteria: filtered test Sharpe ≥ bare ensemble's recorded test Sharpe
+  (BTC 0.90, ETH 0.75 — the batch-2 figures above) on **both** assets, test
+  max drawdown no worse than bare ensemble's (-12.1% BTC), deflated Sharpe
+  probability ≥ 0.95 counting trials in *both* this family and the existing
+  donchian_ensemble family's recorded variant count (this modifies that
+  strategy's actual trades, so it isn't a clean new family).
+- Trial budget: 10 (one veto rule on a fixed strategy, not a new search).
+
+### Hypothesis C — early-exit override on donchian_ensemble, family `reversal/failed-breakout-exit`
+
+Distinct from B: B only gates *new* entries (stays flat instead of opening a
+trade); it never touches a position already held. This hypothesis closes an
+**open** position early, overriding the ensemble's own ATR trailing stop for
+that bar, when the pattern fires against the held direction. Applied to the
+**bare** ensemble (not B's filtered version), to isolate the exit effect from
+the entry-veto effect — a combined B+C variant is a follow-up, not tested
+here, since stacking them would conflate which mechanism did the work.
+
+- Statement: while a donchian_ensemble BTC/USDT 4h position is open, closing
+  it immediately (at that bar's close) when a failed-breakout signal
+  completes against the held direction — pre-empting the ensemble's own
+  exit — improves risk-adjusted return over holding to the ensemble's normal
+  exit.
+- Exit rule, two variants on `exit_trigger` (grid, chosen by train only):
+  - `"reclaim"`: close as soon as the reclaim step (close back on the origin
+    side of the level) completes against the held direction — earlier,
+    cheaper confirmation, more exposed to whipsaw.
+  - `"follow_through"`: close only once follow-through also completes (same
+    definitions as A/B above) — later, more confirmed, gives back more.
+- Runs: BTC/USDT 4h (candidate), ETH/USDT 4h (cross-check). Same train/test
+  windows and cost model as every other entry in this log. Holdout untouched.
+- Pass criteria: test Sharpe ≥ bare ensemble's recorded test Sharpe on
+  **both** assets (BTC 0.90, ETH 0.75), test max drawdown strictly better
+  than bare ensemble's (-12.1% BTC) — this mechanism's entire premise is
+  limiting damage on positions that turn, so an exit rule that doesn't
+  improve drawdown has failed on its own terms even if Sharpe ties. Deflated
+  Sharpe probability ≥ 0.95 counting trials in this family plus the existing
+  donchian_ensemble family's recorded variant count (it edits that
+  strategy's actual trades).
+- Secondary diagnostic (logged, not pass/fail): of all early exits taken,
+  what fraction were followed by continued adverse movement in the next
+  `follow_through_window` bars (the exit was right) versus favorable
+  continuation after the exit (opportunity cost, the exit was premature).
+  Distinguishes "saves drawdown" from "just exits winners early" even if the
+  top-line Sharpe/DD numbers look similar.
+- Trial budget: 10 (one exit rule, two trigger variants, not a new search).
+
+All three were registered live (hypothesis A = #2, B = #3, C = #4) and run
+the same day.
+
+### Results (jobs #42, #45–47): FAIL on all three
+
+A fair comparison needed one correction first: B/C's pass criteria above
+cite the bare ensemble's Sharpe from the original train/test-split research
+(BTC 0.90), not this same anchored-walk-forward methodology. Job #47 reruns
+the bare ensemble (bars_per_day 6) through the identical 9 folds as the
+proper baseline — hosted under hypothesis #1 since it's that same strategy,
+not a new idea.
+
+| Run | OOS Sharpe | Max DD | Positive folds | Deflated Sharpe prob. |
+|---|---|---|---|---|
+| Baseline: bare donchian_ensemble BTC 4h (job #47) | 0.84 | -14.73% | 4/9 | n/a (hyp #1) |
+| A — failed_breakout standalone, BTC 4h (job #42) | **-1.16** | -11.49% | 1/9 | 0.0014 |
+| B — fb veto filter, BTC 4h (job #45) | 0.84 (tied) | -14.74% | 4/9 (tied) | 0.9571 |
+| C — fb early-exit override, BTC 4h (job #46) | 0.81 (worse) | -15.26% (worse) | 4/9 (tied) | 0.9409 |
+
+- **A: FAIL, decisively.** Loses money outright (-9.4% total return over the
+  stitched OOS span) and the deflated Sharpe probability (0.0014) is nowhere
+  close to the 0.95 bar. No ETH cross-check run — not worth the budget on a
+  result this clear.
+- **B: FAIL.** Every one of the 9 folds picked the loosest `veto_lookback=15`
+  on train, so the filter almost never actually blocked a trade — the
+  equity curve is nearly identical to the bare baseline, 0.01pp *worse* on
+  drawdown. Fails both the corrected baseline comparison (needs to beat
+  0.84, ties it) and its own original absolute bar (0.90). Its own deflated
+  Sharpe passes (0.9571) — that only certifies the strategy's Sharpe is
+  non-zero, not that it beats doing nothing.
+- **C: FAIL, and on its own specific premise.** The entire point was limiting
+  drawdown on a reversal; drawdown got *worse* (-15.26% vs -14.73%), not
+  better. Also worse on Sharpe, return, and its own deflated Sharpe
+  (0.9409 < 0.95). No ETH cross-check run on either B or C — neither
+  cleared its BTC bar, so the cross-check budget wasn't spent.
+- Budget used: 6 of the research key's 100 job-creations; hypothesis trial
+  budgets barely touched (A 9/20, B 3/10, C 2/10).
+- Conclusion left to the owner (hypotheses are concluded by a person, and a
+  research key can't conclude() one by design). My reading: all three
+  failed. The 4-step failed-breakout pattern, at least in this mechanical
+  form, has no edge on BTC/USDT 4h standalone, as a veto, or as an exit
+  override.
+
+**Infra bug found along the way, not fixed here:** `Experiment.strategy_label`
+is a Postgres `varchar(80)`, built server-side as
+`f"{strategy_name} {param=val,...}"`. The two wrapper strategy names here
+(27/25 chars) combined with more than ~2 swept/override params overflowed it
+outright (`value too long for type character varying(80)`), failing jobs
+#43/#44 before the retry. Needs a migration widening that column before any
+future job combines a long strategy name with several params.
+
 ## 2026-10-27 — Intraday (day-trading) hypotheses #2–#5 (pre-registered)
 
 Written before any intraday data was downloaded or any result seen.
