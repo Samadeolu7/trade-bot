@@ -328,3 +328,36 @@ Positions never carry overnight (no swap).
   1-hour returns. k in {2.5, 3}; long-only (fade drops) or both sides.
 - Trade against the move. Stop at 1x the move's size beyond the entry.
 - Exit after 4 hours, or at the end of the window.
+
+### Result: all four FAIL the pre-registered bar (scripted run, 2026-10-27)
+
+15m BTC/USDT, 2020-01 to 2026-02-28 (215,943 bars, no holdout data).
+Walk-forward out-of-sample results, 2022-01 to 2026-02, picking the best
+variant per fold:
+
+| Hypothesis | Avg gross/trade | OOS Sharpe @0.02% / 0.05% / 0.10% | Folds + @0.05% | DSR @0.05% |
+|---|---|---|---|---|
+| #2 US-open range breakout | +0.06 to +0.08% | 0.97 / 0.66 / 0.14 | 6/9 | 0.04 |
+| #3 Volatility breakout | +0.01 to +0.13% | 0.56 / 0.31 / -0.53 | 4/9 | 0.01 |
+| #4 Intraday momentum | ~0.00% | -0.02 / -0.68 / -1.77 | 2/9 | 0.00 |
+| #5 Overreaction fade | -0.03 to -0.11% | -1.33 / -1.53 / -1.86 | 1/9 | 0.00 |
+
+- #4 and #5 have no edge even before costs (fading big hourly moves
+  loses: BTC's big hourly moves tend to continue, not reverse).
+- #3's result is one fold (+60% in 2024-H1); the other folds are mostly
+  negative.
+- #2 is the only one with a consistent gross edge (~0.08% per trade,
+  about one trade per weekday), but that's about the size of the costs:
+  Sharpe 0.97 at a 0.02% round trip, 0.66 at 0.05%, and roughly
+  break-even at 0.10%. Its folds were strong in 2022-23 and mixed after
+  (2024-H1 -7.5%, 2025-H1 -7.4%, 2025-H2 -0.7%), so the edge may be
+  fading. It fails the bar at the judging cost (Sharpe, deflated Sharpe).
+- Exness BTCUSDc spec (owner's screenshot): contract 0.01 BTC/lot, swap
+  long -1786.5 points/lot/night (about 0.021% of notional a night, triple
+  on Friday, roughly 7.7% a year for longs; shorts 0), spread floating
+  (number not shown). Day trades pay no swap. The ensemble's backtests
+  left swap out, so its live cost is higher than modelled.
+- Next: measure the real spread. If the round trip is <= ~0.02%, #2 is
+  worth a forward paper test (new data, no multiple-testing problem)
+  before any money. Otherwise intraday is closed for BTC CFDs at these
+  costs.
