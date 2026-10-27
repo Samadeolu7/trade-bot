@@ -523,3 +523,39 @@ variant per fold:
   worth a forward paper test (new data, no multiple-testing problem)
   before any money. Otherwise intraday is closed for BTC CFDs at these
   costs.
+
+## 2026-10-27 — Existing strategies as day trades (hypothesis #6, pre-registered)
+
+Owner's question: how do the strategies we already have do as day trades?
+Written before any run.
+
+**Strategies:** every registered strategy, each on its config.yaml
+defaults, with no tuning.
+- Signal strategies (10): donchian; regime_switched (ADX regime);
+  regime_switched (NATR regime); ema_cross; rsi_bb; market_structure;
+  multi_timeframe; vol_expansion; crt; failed_breakout.
+- Exposure strategies (3): donchian_ensemble, donchian_ensemble_fb_filter,
+  donchian_ensemble_fb_exit. Lookbacks are scaled by bars_per_day (96 on
+  15m, 24 on 1h).
+- Excluded: funding_filtered. It needs Binance futures funding data,
+  which isn't reachable from the research machine.
+
+**Timeframes:** 15m and 1h (1h is resampled from the same 15m data), so
+26 variants in all.
+
+**Day-trade rules** (same window as #2–#5):
+- Entries only on bars that close inside the owner's window (weekdays
+  07:00–21:00 UTC, weekends 00:00–23:45). Everything is forced flat at
+  the window end.
+- Signal strategies keep their own entry signals, stops, trailing stops
+  and targets (the engine's logic), at 1x notional.
+- Exposure strategies hold their target weight only inside the window:
+  they enter at the window start and go flat at its end, paying cost on
+  every weight change.
+
+**Costs and method:** as #2–#5 (0.02 / 0.05 / 0.10% round trip, judged at
+0.05%; anchored 6-month walk-forward from 2022-01-01; holdout excluded).
+Each strategy+timeframe is judged on its own with fixed settings. The
+deflated Sharpe counts all 42 intraday variants tried so far (16 + 26).
+
+**Pass bar:** same as #2–#5.
