@@ -52,3 +52,14 @@ def test_intraday_job_excludes_the_holdout_and_records_every_variant(owner):
     again = client.post("/api/research/intraday-jobs", json.dumps({"batch": "A", "hypothesis_id": h.pk}),
                         content_type="application/json")
     assert again.status_code == 409
+
+
+def test_server_fetch_start_date_parses():
+    import ccxt
+
+    from market.candles import backfill_candles
+    from research.intraday_jobs import START
+
+    assert ccxt.Exchange.parse8601(START) is not None
+    with pytest.raises(ValueError, match="with a time"):
+        backfill_candles(None, "binance", "BTC/USDT", "15m", "2020-01-01")

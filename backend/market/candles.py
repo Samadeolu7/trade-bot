@@ -48,6 +48,8 @@ def backfill_candles(
     """Resumes from the latest stored candle, and re-fetches that one: the
     newest bar is usually still forming when it was stored."""
     since = ccxt.Exchange.parse8601(start_date)
+    if since is None:
+        raise ValueError(f"start date {start_date!r} must be ISO 8601 with a time, e.g. 2020-01-01T00:00:00Z")
     latest = (
         Candle.objects.filter(exchange=exchange_id, symbol=symbol, timeframe=timeframe)
         .order_by("-open_time").values_list("open_time", flat=True).first()

@@ -19,7 +19,7 @@ from trading.services.bots import trade_bot_config
 logger = logging.getLogger(__name__)
 
 KIND = "intraday"
-SYMBOL, TIMEFRAME, START = "BTC/USDT", "15m", "2020-01-01"
+SYMBOL, TIMEFRAME, START = "BTC/USDT", "15m", "2020-01-01T00:00:00Z"  # ccxt needs the time part
 
 
 def validate_intraday_params(params: dict) -> dict:
