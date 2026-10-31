@@ -65,3 +65,36 @@ def test_session_trades_are_flat_by_the_window_end():
     for t in trades:
         start, end = window(t.entry_time.normalize())
         assert start <= t.entry_time < end and t.exit_time <= end and t.exit_time.normalize() == t.entry_time.normalize()
+
+
+def test_always_session_trades_any_hour_and_closes_by_23_45():
+    from bot.research.intraday import _windows
+
+    wed = pd.Timestamp("2024-01-03", tz="UTC")
+    assert window(wed, "always") == (wed, wed + pd.Timedelta(hours=23, minutes=30))
+    idx = pd.date_range(wed, periods=96, freq="15min", tz="UTC")
+    can_open, last = _windows(idx, "always")
+    assert can_open[0] and can_open[8] and not can_open[-1] and last[-2] and last.sum() == 1  # 23:30 bar closes 23:45
+    owner_open, _ = _windows(idx)  # the default is unchanged: no 02:00 entries on a weekday
+    assert not owner_open[8] and owner_open[28]
+    hold_open, hold_last = _windows(idx, "hold")
+    assert hold_open.all() and not hold_last.any()
+
+
+def test_swap_is_charged_per_rollover_with_friday_triple_and_free_weekends():
+    from bot.research.intraday import DayTrade, SWAP_LONG_USD_PER_BTC, daily_returns, rollovers
+
+    thu = pd.Timestamp("2024-01-04 12:00", tz="UTC")
+    mon = pd.Timestamp("2024-01-08 12:00", tz="UTC")
+    assert [d.day_name() for d in rollovers(thu, mon)] == ["Thursday", "Friday", "Saturday", "Sunday"]
+    long = DayTrade(thu, mon, 1, 50_000.0, 50_000.0, "time")
+    short = DayTrade(thu, mon, -1, 50_000.0, 50_000.0, "time")
+    days = pd.DatetimeIndex([mon.normalize()])
+    swap = daily_returns([long], days, 0.0, swap=True).iloc[0]
+    assert abs(swap + 4 * SWAP_LONG_USD_PER_BTC / 50_000) < 1e-12  # 1 (Thu) + 3 (Fri) + 0 + 0
+    assert daily_returns([short], days, 0.0, swap=True).iloc[0] == 0.0  # shorts pay no swap
+    # dodging: close before and reopen after a rollover when that round trip is cheaper than the swap
+    dodge = 0.0002
+    dodged = daily_returns([long], days, 0.0, swap=True, dodge_cost=dodge).iloc[0]
+    one_night = SWAP_LONG_USD_PER_BTC / 50_000  # ~0.036% at 50k: above the 0.02% dodge cost
+    assert abs(dodged + 2 * dodge) < 1e-12 and dodge < one_night  # Thu and Fri dodged, weekend free

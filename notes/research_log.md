@@ -588,3 +588,52 @@ intraday candidate remains #2 (US-open range breakout), which still
 fails its deflated Sharpe and 0.10% robustness checks. It goes to a
 forward paper test if the owner wants one; no money until that has
 months of results.
+
+## 2026-10-31 — 24/7 availability and overnight holding (hypothesis #7, pre-registered)
+
+Owner's question: what if they're available 24 hours, 7 days a week? And
+should a position that's still good be held overnight rather than closed
+to avoid swap? Written before any 24/7 run.
+
+**Inputs:**
+- Exness BTCUSDc spec: long swap -1786.5 points per lot per night, i.e.
+  $17.865 per BTC held, about 0.022% of the position at $80k. Charged at
+  the 00:00 UTC rollover: Mon–Thu x1, Friday x3, Sat/Sun x0. Shorts pay 0.
+- Measured spread: $6.40 at 06:08 UTC, about 0.008%.
+- Judging cost: 0.02% round trip (spread plus slippage), replacing 0.05%
+  now that the spread is known. Robustness check: still profitable (Sharpe
+  > 0) at 0.05%. The rollover spread hasn't been measured, so a rollover
+  round trip is assumed to cost 3x the judging cost (0.06%).
+
+**Batch A: #2–#5 with session "always" (16 variants, same grids).** Every
+day, 00:00–23:45 UTC, flat by 23:45.
+- Range breakout: same US-open range, entries until 21:45 UTC.
+- Volatility breakout: anchored on the 00:00 UTC open (the classic form).
+- Momentum: held for the last 2 hours, 21:45–23:45.
+- Fade: any hour.
+
+**Batch B: existing strategies (12 of them) on 15m and 1h, three
+treatments each (72 variants).**
+- Strategies: those of #6 minus multi_timeframe, which makes no trades on
+  these bars whatever the session.
+- "always": entries any hour, forced flat at 23:45 UTC.
+- "hold": no forced exit. Positions follow the strategy's own stops,
+  targets and signals; the long swap is charged on every rollover held.
+- "hold+dodge": as "hold", but at each rollover where a round trip
+  (0.06%) is cheaper than that night's swap, pay the round trip instead.
+  At $80k that's Friday only (0.067%). This is a fixed cost rule with
+  nothing fitted.
+
+**Not a fitted "is it worth holding" model.** The cost comparison makes
+it unnecessary: closing tonight and reopening tomorrow costs a round trip
+(~0.02%), about the same as one night's swap (~0.022%). So "hold while the
+strategy still wants the position" already is the cost-optimal rule. A
+learned keep/close model would add parameters to fit, for no cost
+advantage. If "hold" beats "always", the strategy's own exit logic is the
+decision model.
+
+**Method and pass bar:** as #2–#6 at the judging cost above. Deflated
+Sharpe counts every intraday variant tried: 42 + 16 + 72 = 130.
+
+**Run with:** `python scripts/intraday_research.py` (downloads the 15m data
+up to 2026-02-28 if missing; it never fetches holdout data).
