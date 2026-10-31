@@ -28,6 +28,7 @@ from bot.strategy.multi_timeframe import MultiTimeframeTrendPullbackStrategy
 from bot.strategy.regime import NatrRegimeFilter, RegimeFilter, Sma200RegimeFilter
 from bot.strategy.regime_switch import RegimeSwitchedStrategy
 from bot.strategy.rsi_bb import RsiBollingerStrategy
+from bot.strategy.us_open_range import UsOpenRangeBreakoutStrategy
 from bot.strategy.vol_expansion import VolatilityExpansionBreakoutStrategy
 
 
@@ -112,6 +113,11 @@ STRATEGY_CATALOG: dict[str, StrategyInfo] = {
             "donchian_ensemble_fb_exit", "exposure", False,
             "Donchian ensemble that closes an open position early on a bearish failed breakout against it.",
             ("donchian_ensemble", "failed_breakout_exit"),
+        ),
+        StrategyInfo(
+            "us_open_range", "signal", True,
+            "15m US-open range breakout: the first close outside 13:30-14:30 UTC's range, stop at its middle, flat by 23:45 UTC.",
+            ("us_open_range",),
         ),
     ]
 }
@@ -198,6 +204,8 @@ def _build_unwrapped(
         return DonchianEnsembleStrategy(strategy_config.get("donchian_ensemble", {}))
     if name == "failed_breakout":
         return FailedBreakoutStrategy(strategy_config.get("failed_breakout", {}))
+    if name == "us_open_range":
+        return UsOpenRangeBreakoutStrategy(strategy_config.get("us_open_range", {}))
     if name == "donchian_ensemble_fb_filter":
         base = DonchianEnsembleStrategy(strategy_config.get("donchian_ensemble", {}))
         return DonchianEnsembleFailedBreakoutFilterStrategy(base, strategy_config.get("failed_breakout_filter", {}))

@@ -17,6 +17,7 @@ def beat():
 def test_status_is_public_and_shows_health_only(owner):
     beat()
     now = timezone.now()
+    Feed.objects.all().delete()  # without the feeds migrations create
     Feed.objects.create(name="ok_feed", strategy="donchian", timeframe="4h",
                         last_bar_at=now - timedelta(hours=8), last_run_at=now, weight=0.41, capital=5000)
     Feed.objects.create(name="paused_feed", strategy="donchian", timeframe="4h", halted=True,

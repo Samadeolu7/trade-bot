@@ -96,7 +96,7 @@ def test_seed_brings_over_feeds_with_open_calls_and_history(tmp_path, owner, quo
     conn.close()
 
     call_command("seed_shadow_bots", str(path), owner="owner")
-    assert Feed.objects.count() == 5
+    assert Feed.objects.exclude(name="us_open_range_15m").count() == 5  # that one comes from a migration
     donchian = Feed.objects.get(name="donchian_4h")
     assert donchian.direction == "short" and donchian.stop == 88000  # CFD calls can be short
     assert donchian.recommendations.get(kind="entry").imported is True

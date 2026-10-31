@@ -681,3 +681,34 @@ half-years, robust to a wider spread, and it improved when the exit was
 moved. But it's the best of many variants tried, and the deflated Sharpe
 says that alone could be luck. The honest next step is a forward paper
 test on new data, which no amount of backtest variants can provide.
+
+### Forward paper test of #7's best result (pre-registered 2026-10-31)
+
+**What runs:** recommendation feed `us_open_range_15m` (strategy
+`us_open_range`, bot/strategy/us_open_range.py), the live version of
+`orb(range_minutes=60, stop_at="mid", session="always")`. A test replays it
+bar by bar and gets the backtest's trades exactly (tests/test_us_open_range.py).
+Settings are fixed for the whole test: range 13:30-14:30 UTC, first 15m
+close outside it from 14:30 to the 21:30 candle, stop at the range middle,
+out at the 23:30 candle's close. Weekdays only. Costs 0.01% per side (the
+0.02% round trip #7 was judged at). Not followed: no trade alerts, results
+in the app only.
+
+**When:** from the first candle after deploy until 2027-01-31, extended
+until there are at least 50 closed trades (the backtest made ~250 a year,
+so about 60 are expected).
+
+**Verdict, decided now:**
+- Pass: at least 50 closed trades, total net return positive at 0.02%,
+  and still positive with another 0.03% per trade taken off (the 0.05%
+  robustness cost). Pass means following it on the Exness demo with
+  alerts, not real money.
+- Fail: net return at 0.02% is zero or negative after 50+ trades. Then
+  this range breakout is dropped; its settings are not re-tuned on the
+  paper data.
+- Paper trades that differ from a backtest replay of the same candles are
+  an engine bug to fix, not a result.
+
+**Caveat:** 50-60 trades is a sanity check, not proof. At the backtest's
+~0.04% net per trade the result can easily be negative by chance even if
+the edge is real, and positive by chance if it isn't.

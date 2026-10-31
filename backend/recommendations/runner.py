@@ -81,6 +81,11 @@ def _evaluate_signal(feed: Feed, strategy, df: pd.DataFrame, bar_time) -> list[R
             feed.stop = float(new_stop)
             position["stop"] = feed.stop
         exit_price, exit_reason = check_exit(position, bar)
+        if exit_price is None and hasattr(strategy, "exit_due"):
+            # a strategy with a time exit (us_open_range: flat by 23:45 UTC)
+            exit_reason = strategy.exit_due(df, feed.entry_time)
+            if exit_reason is not None:
+                exit_price = float(bar["close"])
         if exit_price is not None:
             pnl, effective_exit = close_position(position, exit_price, feed.fee, feed.slippage)
             pnl_pct = pnl / feed.entry_price * 100

@@ -57,7 +57,7 @@ def account(quotes, owner):
 def make_candles(closes, timeframe="1d", start=None, exchange="binance", symbol=SYMBOL):
     from market.candles import upsert_candles
 
-    step = {"1h": 3600, "4h": 14400, "1d": 86400}[timeframe]
+    step = {"15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}[timeframe]
     start = start or datetime(2024, 1, 1, tzinfo=timezone.utc)
     rows = []
     for i, c in enumerate(closes):

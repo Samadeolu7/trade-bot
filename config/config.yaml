@@ -96,6 +96,12 @@ strategy:
     reclaim_window: 5
     follow_through_window: 10
     exit_trigger: follow_through  # reclaim | follow_through — how early the override closes the position
+  us_open_range:               # hypothesis #7's best result, forward paper test from 2026-10-31 (notes/research_log.md); 15m candles only
+    range_start: "13:30"       # UTC, fixed all year as in the backtest
+    range_minutes: 60
+    stop_at: mid               # mid | opposite (far side of the range)
+    last_entry: "21:30"        # UTC open of the last 15m candle that may trigger an entry
+    flat_at: "23:30"           # UTC open of the candle whose close ends the trade (out by 23:45)
   pyramid:                    # research option for signal strategies, off by default (spec Section 8)
     max_adds: 0               # extra units a trade may add on fresh same-direction entry signals; 0 = one position, as every test so far
     add_step_pct: 0.0         # only add once price has moved this fraction in the trade's favour since the last fill

@@ -18,6 +18,8 @@ from trading.services import books
 from trading.services.orders import OrderError, close_position
 
 TIMEFRAMES = ["1h", "4h", "1d"]
+# need what only recommendation feeds have: 15m candles and a time exit
+FEED_ONLY_STRATEGIES = {"us_open_range"}
 # backtest options the live engine doesn't implement yet; a bot using them
 # would trade differently from its research, so they're refused
 RESEARCH_ONLY_SECTIONS = {"pyramid"}
@@ -89,6 +91,8 @@ def create_bot(
 ) -> Bot:
     if strategy not in STRATEGY_CATALOG:
         raise OrderError(f"unknown strategy {strategy!r}")
+    if strategy in FEED_ONLY_STRATEGIES:
+        raise OrderError(f"{strategy} runs only as a recommendation feed (15m candles, end-of-day exit)")
     if timeframe not in TIMEFRAMES:
         raise OrderError(f"timeframe must be one of {', '.join(TIMEFRAMES)}")
     if not 0 < risk_pct <= 0.05:
