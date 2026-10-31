@@ -637,3 +637,47 @@ Sharpe counts every intraday variant tried: 42 + 16 + 72 = 130.
 
 **Run with:** `python scripts/intraday_research.py` (downloads the 15m data
 up to 2026-02-28 if missing; it never fetches holdout data).
+
+### Result #7 (server job #50): nothing passes; one strong near-miss
+
+Data: 215,943 15m bars from 2020-01-01 to 2026-02-28 (holdout excluded);
+9 folds. Sharpe is shown at 0.02% round-trip cost / at 0.05%. 130 trials
+in the deflated Sharpe. Jobs #48 and #49 failed on download bugs (date
+parsing; head of history not fetched) and produced no results; both were
+fixed before #50.
+
+**Batch A: the four ideas, 24/7, flat by 23:45 UTC**
+- **Range breakout, 60-min US-open range, stop at the midpoint: Sharpe
+  1.20 / 0.89, +193% OOS, max DD -20.7%, 8/9 folds positive, 1,026 OOS
+  trades.** It clears every bar except the deflated Sharpe (0.02). The
+  other range-breakout variants: 1.09, 0.92, 0.89, all with 6–8/9 folds.
+  The only difference from #2 is the later exit (23:45 instead of 21:00
+  UTC), and every variant improved with it (#2's best was 0.97 at 0.02%).
+- Volatility breakout anchored at 00:00 UTC is much better than #3's
+  07:00 anchor: best 0.95 / 0.73 (k0.5, both sides), 6/9 folds.
+- Momentum (≤0.22) and fade (all negative) are still no good.
+
+**Batch B: existing strategies, flat nightly vs held overnight**
+- Ensemble, flat nightly ("always"), 1h or 15m: Sharpe ~0.80–0.84,
+  +50%, DD -11 to -12%, 4–5/9 folds. That's about the same as the 4h
+  ensemble held normally (#1: 0.84, +54.7%, -14.7%), with the same weak
+  fold count. The fb filter changes nothing; the fb exit is a hair better.
+- Ensemble held overnight: 0.68–0.73. With the Friday dodge: 0.74–0.79.
+  So for the ensemble, holding overnight is worse than going flat each
+  night, even after the dodge.
+- 1h donchian/regime: holding overnight lifts gross per trade from ~0.07%
+  to 0.45–0.59% (it rides the trend), but drawdowns reach 33–55%.
+  Sharpe: hold 0.57–0.63, hold+dodge 0.61–0.68, flat 0.23–0.70.
+- The rest (ema_cross, rsi_bb, market_structure, vol_expansion, crt,
+  failed_breakout) lose money before costs in every treatment.
+
+**Swap and the Friday dodge:** the dodge added +0.03 to +0.06 Sharpe to
+every held strategy, with the rollover round trip assumed at 0.06%. The
+swap is a real but modest drag, not a reason to avoid holding.
+
+**Reading:** no strategy passes, so no money. The range breakout with a
+late exit is the best intraday evidence so far: consistent across 8 of 9
+half-years, robust to a wider spread, and it improved when the exit was
+moved. But it's the best of many variants tried, and the deflated Sharpe
+says that alone could be luck. The honest next step is a forward paper
+test on new data, which no amount of backtest variants can provide.
