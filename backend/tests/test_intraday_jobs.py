@@ -32,7 +32,8 @@ def test_params():
         validate_intraday_params({"batch": "C"})
 
 
-def test_intraday_job_excludes_the_holdout_and_records_every_variant(owner):
+def test_intraday_job_excludes_the_holdout_and_records_every_variant(owner, monkeypatch):
+    monkeypatch.setattr("research.intraday_jobs.HISTORY_FROM", "2021-07-01")  # synthetic data starts 2021-06
     candles_15m()
     h = Hypothesis.objects.create(title="24/7", statement="s", family="intraday", trial_budget=100)
     client = Client()
@@ -63,3 +64,10 @@ def test_server_fetch_start_date_parses():
     assert ccxt.Exchange.parse8601(START) is not None
     with pytest.raises(ValueError, match="with a time"):
         backfill_candles(None, "binance", "BTC/USDT", "15m", "2020-01-01")
+
+
+def test_job_refuses_incomplete_history(owner):
+    candles_15m()  # synthetic data starts in 2021-06, so the 2020 history is missing
+    job = ResearchJob.objects.create(kind="intraday", created_by=owner, params={"batch": "A"})
+    job = run_job(job, fetch=False)
+    assert job.status == "failed" and "download is incomplete" in job.error

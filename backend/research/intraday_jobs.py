@@ -6,12 +6,13 @@ stay honest."""
 import json
 import logging
 
+import pandas as pd
 from django.utils import timezone
 
 from bot.data.exchange import create_exchange
 from bot.research import intraday_report as R
 from bot.research.backtest_runner import apply_holdout_guard
-from market.candles import backfill_candles, candles_df
+from market.candles import backfill_candles, backfill_head, candles_df
 from research.jobs import JobError, RepeatJobError, code_version, run_key
 from research.models import Experiment, ResearchJob
 from trading.services.bots import trade_bot_config
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 KIND = "intraday"
 SYMBOL, TIMEFRAME, START = "BTC/USDT", "15m", "2020-01-01T00:00:00Z"  # ccxt needs the time part
+HISTORY_FROM = "2020-02-01"  # stored history must start by then, or the download is incomplete
 
 
 def validate_intraday_params(params: dict) -> dict:
@@ -60,13 +62,21 @@ def run_intraday_report(params: dict, fetch: bool = True, job: ResearchJob | Non
     config = trade_bot_config()
     exchange_id = config["exchange"]["id"]
     if fetch:
-        backfill_candles(create_exchange(exchange_id), exchange_id, SYMBOL, TIMEFRAME, START)
+        exchange = create_exchange(exchange_id)
+        # head first: stored candles may only cover recent months, and
+        # backfill_candles only moves forward from the newest one
+        backfill_head(exchange, exchange_id, SYMBOL, TIMEFRAME, START)
+        backfill_candles(exchange, exchange_id, SYMBOL, TIMEFRAME, START)
     holdout = config.get("validation", {}).get("holdout_start")
     df, _ = apply_holdout_guard(candles_df(exchange_id, SYMBOL, TIMEFRAME), holdout, allow_holdout=False,
                                 context_label="intraday job")
     if len(df) == 0:
         raise JobError(f"no {SYMBOL} {TIMEFRAME} candles stored")
     df = df[df.index >= START]
+    if len(df) == 0 or df.index.min() > pd.Timestamp(HISTORY_FROM, tz="UTC"):
+        first = f"{df.index.min():%Y-%m-%d}" if len(df) else "nothing"
+        raise JobError(f"{SYMBOL} {TIMEFRAME} history before the holdout starts at {first}, not 2020: "
+                       "the download is incomplete")
     days, folds = R.setup(df)
 
     def log(msg):
