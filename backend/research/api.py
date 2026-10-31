@@ -259,6 +259,10 @@ def _variant_count(job_or_params) -> int:
     params = job_or_params.params if hasattr(job_or_params, "params") else job_or_params
     if "sizes" in params:
         return len(params["sizes"])
+    if params.get("hypothesis") == 7 and "batch" in params:  # intraday job
+        from research.intraday_jobs import variant_count
+
+        return variant_count(params)
     count = 1
     for values in (params.get("params") or {}).values():
         count *= len(values) if isinstance(values, list) else 1
@@ -363,6 +367,42 @@ def create_walk_forward_job(request, payload: WalkForwardJobIn):
         raise HttpError(400, str(exc)) from exc
     hypothesis = _hypothesis_for_job(request, payload.hypothesis_id, _variant_count(params))
     job = ResearchJob.objects.create(kind=ResearchJob.Kind.WALK_FORWARD, params=params, created_by=request.user,
+                                     hypothesis=hypothesis)
+    if key is not None:
+        ResearchApiKey.objects.filter(pk=key.pk).update(jobs_started=F("jobs_started") + 1)
+    audit("research.job", request=request, target=f"job:{job.pk}", params=params,
+          via_key=f"{key.name} ({key.prefix})" if key else "")
+    return job
+
+
+class IntradayJobIn(Schema):
+    # "A": the 4 day-trading ideas 24/7; "B": existing strategies, flat nightly vs held overnight; "all"
+    batch: str = "all"
+    hypothesis_id: int | None = None
+
+
+@router.post("/intraday-jobs", response=JobOut, auth=research_auth)
+def create_intraday_job(request, payload: IntradayJobIn):
+    """Pre-registered hypothesis #7 on 15m BTC candles (holdout excluded).
+    Batch B takes 20-40 minutes on the worker."""
+    from research.intraday_jobs import check_not_repeat_intraday, validate_intraday_params, variant_count
+
+    key = getattr(request, "research_key", None)
+    if key is None:
+        if request.user.role == "viewer":
+            raise HttpError(403, "viewers can't start research jobs")
+        require_verified(request)
+    elif key.jobs_started >= key.max_jobs:
+        raise HttpError(429, f"this key has started its limit of {key.max_jobs} jobs; create a new one")
+    try:
+        params = validate_intraday_params(payload.dict())
+        check_not_repeat_intraday(params)
+    except RepeatJobError as exc:
+        raise HttpError(409, str(exc)) from exc
+    except JobError as exc:
+        raise HttpError(400, str(exc)) from exc
+    hypothesis = _hypothesis_for_job(request, payload.hypothesis_id, variant_count(params))
+    job = ResearchJob.objects.create(kind=ResearchJob.Kind.INTRADAY, params=params, created_by=request.user,
                                      hypothesis=hypothesis)
     if key is not None:
         ResearchApiKey.objects.filter(pk=key.pk).update(jobs_started=F("jobs_started") + 1)

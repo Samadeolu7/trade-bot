@@ -319,6 +319,10 @@ def run_job(job: ResearchJob, fetch: bool = True) -> ResearchJob:
             from research.walkforward_jobs import run_walk_forward_report, validate_walk_forward_params
 
             job.result = run_walk_forward_report(validate_walk_forward_params(job.params), fetch=fetch, job=job)
+        elif job.kind == ResearchJob.Kind.INTRADAY:
+            from research.intraday_jobs import run_intraday_report, validate_intraday_params
+
+            job.result = run_intraday_report(validate_intraday_params(job.params), fetch=fetch, job=job)
         else:
             job.result = run_research_report(validate_params(job.kind, job.params), fetch=fetch, job=job)
         job.status = ResearchJob.Status.DONE

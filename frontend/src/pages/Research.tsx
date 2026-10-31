@@ -168,6 +168,78 @@ function WalkForwardResult({ result }: { result: WalkForward }) {
   )
 }
 
+type IntradayRow = {
+  label: string
+  trades: number
+  gross_pct: number | null
+  sharpe: number
+  sharpe_robust: number
+  return_pct: number
+  max_drawdown_pct: number
+  positive_folds: number
+  folds: number
+  oos_trades: number
+  deflated_sharpe: number
+  pass: boolean
+}
+type Intraday = {
+  header: Record<string, string | number>
+  batches: Record<string, { title: string; rows: IntradayRow[] }>
+}
+
+function IntradayResult({ result }: { result: Intraday }) {
+  return (
+    <div className="space-y-3 pb-3">
+      <p className="px-4 pt-3 text-[12px] text-muted">
+        {result.header.data}. {result.header.folds}. Holdout {result.header.holdout}. Costs {result.header.costs}.
+      </p>
+      {Object.entries(result.batches).map(([name, batch]) => (
+        <div key={name}>
+          <div className="px-4 pb-1 text-[13px] font-semibold">{batch.title}</div>
+          <div className="overflow-x-auto">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Variant</th>
+                  <th className="r">Trades</th>
+                  <th className="r">Gross/trade</th>
+                  <th className="r">Sharpe</th>
+                  <th className="r">Sharpe, wide spread</th>
+                  <th className="r">Return</th>
+                  <th className="r">Max drawdown</th>
+                  <th className="r">Folds +</th>
+                  <th className="r">Real chance</th>
+                  <th>Verdict</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...batch.rows]
+                  .sort((a, b) => b.sharpe - a.sharpe)
+                  .map((r) => (
+                    <tr key={r.label}>
+                      <td>{r.label}</td>
+                      <td className="num r">{r.trades}</td>
+                      <td className="num r">{r.gross_pct == null ? '—' : n(r.gross_pct, '%')}</td>
+                      <td className="num r">{r.sharpe}</td>
+                      <td className="num r">{r.sharpe_robust}</td>
+                      <td className="num r">{n(r.return_pct, '%')}</td>
+                      <td className="num r">{n(r.max_drawdown_pct, '%')}</td>
+                      <td className="num r">
+                        {r.positive_folds}/{r.folds}
+                      </td>
+                      <td className="num r">{(r.deflated_sharpe * 100).toFixed(0)}%</td>
+                      <td className={r.pass ? 'font-semibold text-up' : 'text-ink-2'}>{r.pass ? 'Pass' : 'Fail'}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function ReportPanel({
   title,
   subtitle,
@@ -229,7 +301,7 @@ function Jobs({ onRunAgain }: { onRunAgain?: (draft: ReportDraft) => void }) {
         return (
           <ReportPanel
             key={job.id}
-            title={`${params.strategy} on ${params.timeframe}`}
+            title={job.kind === 'intraday' ? 'Intraday research (hypothesis #7)' : `${params.strategy} on ${params.timeframe}`}
             subtitle={[job.kind === 'walk_forward' ? 'walk-forward' : '', ...Object.keys(params.params ?? {})]
               .filter(Boolean)
               .join(', ')}
@@ -247,7 +319,10 @@ function Jobs({ onRunAgain }: { onRunAgain?: (draft: ReportDraft) => void }) {
             {job.status === 'done' && job.kind === 'walk_forward' && (
               <WalkForwardResult result={job.result as unknown as WalkForward} />
             )}
-            {job.status === 'done' && job.kind !== 'walk_forward' && (
+            {job.status === 'done' && job.kind === 'intraday' && (
+              <IntradayResult result={job.result as unknown as Intraday} />
+            )}
+            {job.status === 'done' && job.kind !== 'walk_forward' && job.kind !== 'intraday' && (
               <div className="space-y-3 pb-3">
                 {header && (
                   <p className="px-4 pt-3 text-[12px] text-muted">

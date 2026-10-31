@@ -39,6 +39,12 @@ def report_done(job: ResearchJob) -> None:
     if job.status == ResearchJob.Status.FAILED:
         notify(AlertRule.Kind.RESEARCH_DONE, f"Research report failed: {params.get('strategy')}", job.error[:500])
         return
+    if job.kind == ResearchJob.Kind.INTRADAY:
+        from research.intraday_jobs import report_lines as intraday_lines
+
+        notify(AlertRule.Kind.RESEARCH_DONE, "Intraday research ready (hypothesis #7)",
+               "\n".join(intraday_lines(job.result)))
+        return
     if job.kind == ResearchJob.Kind.WALK_FORWARD:
         from research.walkforward_jobs import report_lines
 

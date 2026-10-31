@@ -934,6 +934,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/research/intraday-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Intraday Job
+         * @description Pre-registered hypothesis #7 on 15m BTC candles (holdout excluded).
+         *     Batch B takes 20-40 minutes on the worker.
+         */
+        post: operations["research_api_create_intraday_job"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/research/jobs": {
         parameters: {
             query?: never;
@@ -1849,6 +1870,16 @@ export interface components {
             trial_budget: number;
             /** Trials Used */
             trials_used: number;
+        };
+        /** IntradayJobIn */
+        IntradayJobIn: {
+            /**
+             * Batch
+             * @default all
+             */
+            batch: string;
+            /** Hypothesis Id */
+            hypothesis_id?: number | null;
         };
         /** JobIn */
         JobIn: {
@@ -4043,6 +4074,30 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HypothesisOut"];
+                };
+            };
+        };
+    };
+    research_api_create_intraday_job: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IntradayJobIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobOut"];
                 };
             };
         };

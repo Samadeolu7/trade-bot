@@ -108,6 +108,7 @@ class ResearchJob(models.Model):
         RESEARCH_REPORT = "research_report", "Research report"
         PORTFOLIO_REPORT = "portfolio_report", "Portfolio report"
         WALK_FORWARD = "walk_forward", "Walk-forward validation"
+        INTRADAY = "intraday", "Intraday research (hypothesis #7)"
 
     class Status(models.TextChoices):
         QUEUED = "queued", "Queued"

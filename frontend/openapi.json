@@ -1700,6 +1700,28 @@
         "title": "HypothesisOut",
         "type": "object"
       },
+      "IntradayJobIn": {
+        "properties": {
+          "batch": {
+            "default": "all",
+            "title": "Batch",
+            "type": "string"
+          },
+          "hypothesis_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hypothesis Id"
+          }
+        },
+        "title": "IntradayJobIn",
+        "type": "object"
+      },
       "JobIn": {
         "properties": {
           "baseline": {
@@ -6422,6 +6444,47 @@
           }
         ],
         "summary": "Conclude Hypothesis",
+        "tags": [
+          "research"
+        ]
+      }
+    },
+    "/api/research/intraday-jobs": {
+      "post": {
+        "description": "Pre-registered hypothesis #7 on 15m BTC candles (holdout excluded).\nBatch B takes 20-40 minutes on the worker.",
+        "operationId": "research_api_create_intraday_job",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntradayJobIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "ResearchKeyAuth": []
+          },
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "Create Intraday Job",
         "tags": [
           "research"
         ]
