@@ -1749,6 +1749,20 @@
             "title": "Batch",
             "type": "string"
           },
+          "events": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Events"
+          },
           "hypothesis_id": {
             "anyOf": [
               {

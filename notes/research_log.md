@@ -775,3 +775,56 @@ funding fetches from Binance futures all succeeded).
   funding) would be a new, separately registered hypothesis.
 - Infrastructure check passed: lag levels ran as separate recorded
   variants, each report states its delays and basis.
+
+## 2026-11-26 — Hypothesis #9: funding filter with trailing-percentile thresholds (pre-registered)
+
+Follows #8, whose fixed +0.0005 threshold almost never fired. The
+threshold is now set by a rule instead of a number, fixed here before any
+result: veto a long when funding is above its own 90th percentile over
+the trailing 365 days (a short when below the 10th), no veto until 90
+days of history exist. Each print's thresholds use only prints at or
+before it, and arrive with it under the lag model.
+
+- Strategy: funding_filtered, base donchian, BTC/USDT 4h,
+  `funding_filtered.percentile` 0.9 (primary) and 0.95 (sensitivity check
+  only: reported, not a second shot at passing).
+- Runs (budget 9 variants): research report at lag zero, p95,
+  p95_outages, plus_1d for both percentiles, baseline donchian (8);
+  walk-forward of the 0.9 version at lag p95, 6-month folds from
+  2022-01-01 (1).
+- Pass (0.9 version), all of: test window (2024-01-01 to the holdout) at
+  p95, Sharpe and total return above plain donchian's; at p95_outages,
+  Sharpe above plain donchian's; walk-forward at p95 deflated Sharpe
+  probability >= 0.95 and at least half the folds positive.
+- Fail otherwise, including if 0.9 passes but 0.95 is worse than plain
+  donchian on test-window return (a filter whose sign flips with a small
+  change of its setting is noise).
+- Lag levels are still on the assumed delays (live samples not yet at 30).
+
+## 2026-11-26 — Hypothesis #10: skip FOMC days in the US-open range breakout (pre-registered)
+
+The range breakout (#7's best: 60-min range from 13:30 UTC, stop at the
+middle, flat by 23:45 UTC) is being paper tested. FOMC statements come out
+at 18:00/19:00 UTC, mid-trade. Idea: those afternoons whipsaw breakouts,
+so skipping FOMC days helps.
+
+- Calendar: the 63 scheduled FOMC statement days 2020-2027 from
+  federalreserve.gov (bot/data/macro_calendar.py); unscheduled meetings,
+  the cancelled March 2020 meeting and notation votes excluded. Dates are
+  published months ahead, so there's no look-ahead and no data lag to
+  simulate.
+- Runs (budget 2 variants): one intraday job, batch macro, events [fomc]:
+  "orb baseline" and "orb skip fomc days", 15m candles 2020 to the
+  holdout, judged at 0.02% round trip as in #7.
+- Pass, both of: the bootstrap 5-95% range of the mean net return of
+  FOMC-day trades entered from 2022-01-01 lies entirely below the mean of
+  the other days' trades; and "skip fomc days" has a higher walk-forward
+  Sharpe than the baseline at both 0.02% and 0.05%.
+- Fail otherwise. Expect about 33 FOMC-day trades out of sample, so an
+  inconclusive result is likely; inconclusive counts as a fail (the live
+  test keeps trading FOMC days).
+- If FOMC days turn out clearly *better* than other days, that's recorded
+  as information, not acted on: it wasn't the hypothesis.
+- Next (#10b, registered separately once FRED_API_KEY is on the server):
+  the same test for CPI and jobs-report days (08:30 New York, just before
+  or at the range).

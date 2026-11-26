@@ -71,3 +71,37 @@ def test_job_refuses_incomplete_history(owner):
     job = ResearchJob.objects.create(kind="intraday", created_by=owner, params={"batch": "A"})
     job = run_job(job, fetch=False)
     assert job.status == "failed" and "download is incomplete" in job.error
+
+
+def test_macro_params_need_fred_for_cpi_and_nfp(monkeypatch):
+    monkeypatch.delenv("FRED_API_KEY", raising=False)
+    assert validate_intraday_params({"batch": "macro"}) == {"hypothesis": 9, "batch": "macro", "events": ["fomc"]}
+    with pytest.raises(JobError, match="FRED_API_KEY"):
+        validate_intraday_params({"batch": "macro", "events": ["cpi", "fomc"]})
+    with pytest.raises(JobError, match="events"):
+        validate_intraday_params({"batch": "macro", "events": ["gdp"]})
+    monkeypatch.setenv("FRED_API_KEY", "x")
+    assert validate_intraday_params({"batch": "macro", "events": ["nfp", "fomc", "cpi"]})["events"] == ["fomc", "cpi", "nfp"]
+
+
+def test_macro_job_runs_and_counts_its_variants(owner, monkeypatch):
+    from research.intraday_jobs import variant_count
+
+    monkeypatch.setattr("research.intraday_jobs.HISTORY_FROM", "2021-07-01")
+    candles_15m()
+    h = Hypothesis.objects.create(title="macro", statement="s", family="intraday/macro", trial_budget=2)
+    client = Client()
+    client.force_login(owner)
+    response = client.post("/api/research/intraday-jobs", json.dumps({"batch": "macro", "hypothesis_id": h.pk}),
+                           content_type="application/json")
+    assert response.status_code == 200, response.content
+    job = ResearchJob.objects.get(pk=response.json()["id"])
+    assert variant_count(job.params) == 2
+    run_job(job, fetch=False)
+    job.refresh_from_db()
+    assert job.status == "done", job.error
+    rows = job.result["batches"]["macro"]["rows"]
+    assert [r["label"] for r in rows] == ["orb baseline", "orb skip fomc days"]
+    assert job.result["event_days"]["fomc"]["event_day_trades"] > 0
+    assert Experiment.objects.filter(job=job).count() == 2
+    assert h.trials_used() == 2

@@ -259,7 +259,7 @@ def _variant_count(job_or_params) -> int:
     params = job_or_params.params if hasattr(job_or_params, "params") else job_or_params
     if "sizes" in params:
         return len(params["sizes"])
-    if params.get("hypothesis") == 7 and "batch" in params:  # intraday job
+    if params.get("hypothesis") in (7, 9) and "batch" in params:  # intraday job
         from research.intraday_jobs import variant_count
 
         return variant_count(params)
@@ -384,8 +384,11 @@ def create_walk_forward_job(request, payload: WalkForwardJobIn):
 
 
 class IntradayJobIn(Schema):
-    # "A": the 4 day-trading ideas 24/7; "B": existing strategies, flat nightly vs held overnight; "all"
+    # "A": the 4 day-trading ideas 24/7; "B": existing strategies, flat nightly vs held overnight; "all";
+    # "macro": hypothesis #9, the range breakout with scheduled macro event days skipped
     batch: str = "all"
+    # batch "macro" only: which event days (fomc, cpi, nfp); cpi/nfp need FRED_API_KEY on the server
+    events: list[str] | None = None
     hypothesis_id: int | None = None
 
 

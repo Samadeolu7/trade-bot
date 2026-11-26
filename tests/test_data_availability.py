@@ -125,3 +125,41 @@ def test_funding_filter_with_lag_vetoes_later():
     assert _funding_filter(LagModel()) == ["long", None, None, None, None, None]
     # 2h15m late: arrives 04:15, first used at bar 4's close (05:00)
     assert _funding_filter(LagModel(source_delay_s=8100)) == ["long", "long", "long", "long", None, None]
+
+
+def _prints(rates, start="2023-01-01"):
+    idx = pd.date_range(start, periods=len(rates), freq="8h", tz="UTC", name="funding_time")
+    return pd.DataFrame({"funding_rate": rates}, index=idx)
+
+
+def test_percentile_thresholds_use_only_past_prints():
+    rng = np.random.default_rng(1)
+    full = _prints(rng.normal(0.0001, 0.0002, 3 * 400))
+    early = full.iloc[: 3 * 200]
+    a = FundingFilteredStrategy(AlwaysLongStrategy(), full, 0, 0, percentile=0.9, window_days=100, min_days=30)
+    b = FundingFilteredStrategy(AlwaysLongStrategy(), early, 0, 0, percentile=0.9, window_days=100, min_days=30)
+    # thresholds up to a time don't depend on prints after it
+    pd.testing.assert_frame_equal(a.levels().iloc[: len(early)], b.levels())
+    lv = a.levels()
+    assert lv["high"].iloc[: 3 * 30].isna().all() and lv["high"].iloc[3 * 31:].notna().all()
+    assert (lv["low"].dropna() < lv["high"].dropna()).all()
+
+
+def test_percentile_filter_vetoes_the_top_of_the_trailing_range():
+    # calm funding for 100 days, then one spike, then calm again
+    rates = [0.0001] * 300 + [0.0002] + [0.0001] * 20
+    funding = _prints(rates)
+    spike_time = funding.index[300]
+    bars = pd.date_range(spike_time - pd.Timedelta(hours=8), periods=4, freq="8h", tz="UTC")
+    close = pd.Series(100.0, index=bars)
+    df = pd.DataFrame({"open": close, "high": close + 1, "low": close - 1, "close": close, "volume": 1.0})
+    s = FundingFilteredStrategy(AlwaysLongStrategy(), funding, 1, -1, percentile=0.9, window_days=90, min_days=30,
+                                lag=LagModel())
+    dirs = [d if isinstance(d, str) else None for d in s.entry_signals(df)["direction"]]
+    # the spike is printed at bar 1's open, so known by bar 0's close
+    assert dirs == [None, "long", "long", "long"]
+
+
+def test_percentile_must_be_an_upper_percentile():
+    with pytest.raises(ValueError):
+        FundingFilteredStrategy(AlwaysLongStrategy(), _prints([0.0]), 0, 0, percentile=0.3)
