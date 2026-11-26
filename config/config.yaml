@@ -117,6 +117,27 @@ funding:
   exchange_id: binanceusdm
   symbol: "BTC/USDT:USDT"   # ccxt unified perpetual symbol
 
+# Simulated lag for outside data in research (bot/data/availability.py):
+# research jobs can rerun a strategy with its outside data arriving late
+# (`lag_levels` / `lag_level`). The delays come from the live engine's own
+# fetch logs once there are `min_samples` of them; until then, from these
+# assumptions, which are deliberately on the slow side.
+data_lag:
+  # the engine fetches funding every bar poll even with no funding bot
+  # running, so the real lag gets measured before anything depends on it
+  measure_funding: true
+  # bar_close: data counts from the first bar close after it arrives (what
+  # the engine can do). bar_open reproduces funding_filtered's live lookup,
+  # which uses the rate as of the bar's open, up to a bar staler.
+  use_at: bar_close
+  assumptions:
+    funding:
+      typical_s: 120        # median seconds from a print to the engine having it
+      p95_s: 900            # 95% of prints arrive within this
+      min_samples: 30       # live samples needed before measured numbers replace these (10 days of 8h prints)
+      outage_rate: 0.05     # at least this share of values hit by an outage in the p95_outages level
+      outage_s: 21600       # and each of those this much later (6h), or the longest measured outage if longer
+
 backtest:
   fee: 0.001          # Quidax order-book taker fee
   slippage: 0.0005

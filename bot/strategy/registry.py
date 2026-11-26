@@ -128,6 +128,11 @@ TREND_STRATEGY_CHOICES = [
 ]
 
 
+# strategies that read outside data, and which source: these are the ones a
+# research lag sweep (bot/data/availability.py) applies to
+EXTERNAL_DATA = {"funding_filtered": "funding"}
+
+
 def empty_funding_df() -> pd.DataFrame:
     return pd.DataFrame(
         {"funding_rate": []}, index=pd.DatetimeIndex([], tz="UTC", name="funding_time")
@@ -170,11 +175,13 @@ def build_strategy(
     strategy_config: dict,
     funding_df: pd.DataFrame | None = None,
     funding_refresh_fn=None,
+    data_lag=None,
 ) -> Strategy:
-    """`strategy_config` is config.yaml's `strategy:` mapping (with any
+    """`data_lag`: a LagModel for strategies in EXTERNAL_DATA (backtests
+    only). `strategy_config` is config.yaml's `strategy:` mapping (with any
     overrides already applied). `long_only: true` in the named strategy's
     own section wraps the result in LongOnlyStrategy."""
-    strategy = _build_unwrapped(name, strategy_config, funding_df, funding_refresh_fn)
+    strategy = _build_unwrapped(name, strategy_config, funding_df, funding_refresh_fn, data_lag)
     if strategy_config.get(name, {}).get("long_only") and not hasattr(strategy, "target_weights"):
         return LongOnlyStrategy(strategy)
     return strategy
@@ -185,6 +192,7 @@ def _build_unwrapped(
     strategy_config: dict,
     funding_df: pd.DataFrame | None,
     funding_refresh_fn,
+    data_lag=None,
 ) -> Strategy:
     if name == "ema_cross":
         return EmaCrossStrategy(strategy_config.get("ema_cross", {}))
@@ -229,6 +237,7 @@ def _build_unwrapped(
             high_threshold,
             low_threshold,
             refresh_fn=funding_refresh_fn,
+            lag=data_lag,
         )
 
     # regime_switched: trend/ranging sub-strategies and regime-filter type are

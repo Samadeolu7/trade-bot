@@ -27,13 +27,14 @@ def run_strategy_backtest(
     backtest_config: dict,
     funding_df: pd.DataFrame | None = None,
     warmup_df: pd.DataFrame | None = None,
+    data_lag=None,
 ):
     """The backtest result (trades + equity curve) for one strategy on
     `df`. `warmup_df`: longer history ending where `df` ends, used only by
     exposure strategies (fraction-of-capital sizing, e.g. donchian_ensemble)
     to compute targets before the window starts — their longest lookback is
     a year, which would otherwise sit idle through the first year of `df`."""
-    strategy = build_strategy(strategy_name, strategy_config, funding_df=funding_df)
+    strategy = build_strategy(strategy_name, strategy_config, funding_df=funding_df, data_lag=data_lag)
     if hasattr(strategy, "target_weights"):
         weights = None
         if warmup_df is not None and len(warmup_df):
@@ -65,9 +66,11 @@ def run_backtest_summary(
     timeframe: str,
     funding_df: pd.DataFrame | None = None,
     warmup_df: pd.DataFrame | None = None,
+    data_lag=None,
 ) -> tuple[dict, pd.Series]:
     """Returns (summary, equity_curve); see run_strategy_backtest."""
-    result = run_strategy_backtest(df, strategy_name, strategy_config, backtest_config, funding_df, warmup_df)
+    result = run_strategy_backtest(df, strategy_name, strategy_config, backtest_config, funding_df, warmup_df,
+                                   data_lag)
     summary = summarize(
         result.trades,
         result.equity_curve,

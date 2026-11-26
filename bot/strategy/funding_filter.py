@@ -3,6 +3,7 @@ from typing import Callable
 
 import pandas as pd
 
+from bot.data.availability import LagModel, asof_values
 from bot.strategy.base import Direction, Signal, Strategy
 
 
@@ -20,7 +21,11 @@ class FundingFilteredStrategy(Strategy):
 
     Funding prints roughly every 8h, far sparser than the base candle
     timeframe, so the most recent rate at-or-before each bar's timestamp is
-    looked up (as-of / backward-fill), not a one-per-bar alignment."""
+    looked up (as-of / backward-fill), not a one-per-bar alignment.
+
+    `lag` (backtests only): a LagModel saying when each print would really
+    have reached the engine; see bot/data/availability.py. Without one, the
+    rate is looked up at each bar's open time, as the live path does."""
 
     name = "funding_filtered"
 
@@ -31,6 +36,7 @@ class FundingFilteredStrategy(Strategy):
         high_threshold: float,
         low_threshold: float,
         refresh_fn: Callable[[], pd.DataFrame] | None = None,
+        lag: LagModel | None = None,
     ):
         super().__init__({})
         self.base = base
@@ -41,6 +47,7 @@ class FundingFilteredStrategy(Strategy):
         # backtests get a fixed funding_df for the whole historical window
         # and pass no refresh_fn.
         self.refresh_fn = refresh_fn
+        self.lag = lag
         self.min_lookback = base.min_lookback
 
     def before_poll(self) -> None:
@@ -78,15 +85,18 @@ class FundingFilteredStrategy(Strategy):
         if len(self.funding_df) == 0:
             return base_signals
 
-        left = pd.DataFrame({"open_time": df.index}).sort_values("open_time")
-        right = (
-            self.funding_df.reset_index()[["funding_time", "funding_rate"]]
-            .sort_values("funding_time")
-        )
-        merged = pd.merge_asof(
-            left, right, left_on="open_time", right_on="funding_time", direction="backward"
-        )
-        funding = pd.Series(merged["funding_rate"].to_numpy(), index=df.index)
+        if self.lag is not None and len(df) >= 2:
+            funding = asof_values(self.funding_df["funding_rate"], df.index, self.lag)
+        else:
+            left = pd.DataFrame({"open_time": df.index}).sort_values("open_time")
+            right = (
+                self.funding_df.reset_index()[["funding_time", "funding_rate"]]
+                .sort_values("funding_time")
+            )
+            merged = pd.merge_asof(
+                left, right, left_on="open_time", right_on="funding_time", direction="backward"
+            )
+            funding = pd.Series(merged["funding_rate"].to_numpy(), index=df.index)
 
         vetoed_long = (base_signals["direction"] == "long") & (funding > self.high_threshold)
         vetoed_short = (base_signals["direction"] == "short") & (funding < self.low_threshold)

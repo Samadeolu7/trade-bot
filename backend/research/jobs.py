@@ -9,6 +9,7 @@ import hashlib
 import itertools
 import json
 import logging
+import math
 from pathlib import Path
 
 import pandas as pd
@@ -57,15 +58,19 @@ def code_version() -> str:
 
 
 def run_key(strategy: str, symbol: str, timeframe: str, strategy_config: dict, backtest_config: dict,
-            holdout_start: str | None) -> str:
+            holdout_start: str | None, lag: dict | None = None) -> str:
     """Everything that decides a research report variant's numbers. Same
-    key means the same computation on the same data windows."""
+    key means the same computation on the same data windows. `lag` is the
+    simulated data lag (a LagModel's dict), when there is one: the same
+    level name can mean different delays once live measurements change it."""
     identity = {
         "strategy": strategy, "symbol": symbol, "timeframe": timeframe,
         "config": _effective_config(strategy_config), "backtest": backtest_config,
         "train": TRAIN, "test_start": TEST_START, "holdout_start": holdout_start,
         "code": code_version(),
     }
+    if lag is not None:
+        identity["lag"] = lag
     return hashlib.sha256(json.dumps(identity, sort_keys=True, default=str).encode()).hexdigest()[:24]
 
 
@@ -92,6 +97,23 @@ def variants(params: dict, base_config: dict) -> list[tuple[str, dict]]:
         label = ", ".join(f"{k.split('.', 1)[1]}={v}" for k, v in zip(keys, combo)) or "defaults"
         out.append((f"{params['strategy']} {label}", strategy_config))
     return out
+
+
+def lagged_variants(params: dict, base_config: dict) -> list[tuple[str, dict, object]]:
+    """(label, strategy config, LagModel or None) for every variant, times
+    every requested lag level."""
+    plain = variants(params, base_config)
+    names = params.get("lag_levels") or []
+    if not names:
+        return [(label, cfg, None) for label, cfg in plain]
+    from research.lag import levels_for
+
+    levels, _ = levels_for(params["strategy"])
+    return [(f"{label} @ lag {name}", cfg, levels[name]) for label, cfg in plain for name in names]
+
+
+def _lag_dict(lag) -> dict | None:
+    return lag.to_dict() if lag is not None else None
 
 
 def earlier_runs(keys: list[str]) -> dict[str, list[Experiment]]:
@@ -124,8 +146,9 @@ def check_not_repeat(params: dict) -> None:
     holdout_start = config.get("validation", {}).get("holdout_start")
     backtest_config = config.get("backtest", {})
     keyed = [
-        (label, run_key(params["strategy"], params["symbol"], params["timeframe"], cfg, backtest_config, holdout_start))
-        for label, cfg in variants(params, config.get("strategy", {}))
+        (label, run_key(params["strategy"], params["symbol"], params["timeframe"], cfg, backtest_config, holdout_start,
+                        _lag_dict(lag)))
+        for label, cfg, lag in lagged_variants(params, config.get("strategy", {}))
     ]
     earlier = earlier_runs([key for _, key in keyed])
     if keyed and all(key in earlier for _, key in keyed):
@@ -166,13 +189,24 @@ def validate_params(kind: str, params: dict) -> dict:
         if not isinstance(values, list) or not values:
             raise JobError(f"{path!r} needs a list of values")
         combos *= len(values)
+    from research.lag import LagError, validate_levels
+
+    try:
+        lag_levels = validate_levels(strategy, params.get("lag_levels"))
+    except LagError as exc:
+        raise JobError(str(exc)) from exc
+    combos *= max(1, len(lag_levels))
     if combos > MAX_VARIANTS:
-        raise JobError(f"{combos} variants requested; the limit is {MAX_VARIANTS} per job")
+        raise JobError(f"{combos} variants requested (parameter combinations x lag levels); "
+                       f"the limit is {MAX_VARIANTS} per job")
     _check_pyramid(grid)
-    return {
+    out = {
         "strategy": strategy, "symbol": params.get("symbol", "BTC/USDT"),
         "timeframe": params.get("timeframe", "4h"), "baseline": baseline, "params": grid,
     }
+    if lag_levels:
+        out["lag_levels"] = lag_levels
+    return out
 
 
 def _check_pyramid(grid: dict) -> None:
@@ -208,6 +242,18 @@ def _downsample(curve: pd.Series) -> list[list[float]]:
     return [[int(ts.timestamp()), round(float(v), 2)] for ts, v in sampled.items()]
 
 
+def _json_safe(value):
+    """JSON the database accepts: a profit factor with no losing trades is
+    infinite, which isn't valid JSON, so non-finite numbers become null."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    return value
+
+
 def _record(kind, strategy, symbol, timeframe, window_df, strategy_config, summary, key="", job=None) -> None:
     config_json = json.dumps(strategy_config, sort_keys=True, default=str)
     Experiment.objects.create(
@@ -217,7 +263,7 @@ def _record(kind, strategy, symbol, timeframe, window_df, strategy_config, summa
         touched_holdout=False, config=json.loads(config_json),
         config_hash=hashlib.sha256(config_json.encode()).hexdigest()[:12],
         data_version=f"{len(window_df)} bars, {window_df.index.min()}–{window_df.index.max()}",
-        result=json.loads(json.dumps(summary, default=str)),
+        result=_json_safe(json.loads(json.dumps(summary, default=str))),
     )
 
 
@@ -246,8 +292,8 @@ def run_research_report(params: dict, fetch: bool = True, job: ResearchJob | Non
                              fc.get("start_date", config["backfill"]["start_date"]))
         funding = funding_df(fc.get("exchange_id", "binanceusdm"), fc.get("symbol", "BTC/USDT:USDT"))
 
-    def run(name: str, strategy_config: dict) -> dict:
-        key = run_key(name, symbol, timeframe, strategy_config, backtest_config, holdout_start)
+    def run(name: str, strategy_config: dict, lag=None) -> dict:
+        key = run_key(name, symbol, timeframe, strategy_config, backtest_config, holdout_start, _lag_dict(lag))
         out = {"windows": {}, "equity": {}}
         for window, window_df in windows.items():
             if len(window_df) == 0:
@@ -257,10 +303,13 @@ def run_research_report(params: dict, fetch: bool = True, job: ResearchJob | Non
                 window_df, name, strategy_config, backtest_config, timeframe,
                 funding if name == "funding_filtered" else None,
                 warmup_df=all_df[all_df.index <= window_df.index.max()],
+                data_lag=lag,
             )
             _record("research_report", name, symbol, timeframe, window_df, strategy_config, summary, key, job)
-            out["windows"][window] = json.loads(json.dumps(summary, default=str))
+            out["windows"][window] = _json_safe(json.loads(json.dumps(summary, default=str)))
             out["equity"][window] = _downsample(curve)
+        if lag is not None:
+            out["lag"] = {"level": lag.name, "model": lag.to_dict(), "described": lag.describe()}
         return out
 
     def reuse(rows: list[Experiment]) -> dict:
@@ -272,20 +321,21 @@ def run_research_report(params: dict, fetch: bool = True, job: ResearchJob | Non
                 "earlier_result": f"{ref}, {test.created_at:%Y-%m-%d %H:%M} UTC"}
 
     keyed = [
-        (label, cfg, run_key(params["strategy"], symbol, timeframe, cfg, backtest_config, holdout_start))
-        for label, cfg in variants(params, base_config)
+        (label, cfg, lag, run_key(params["strategy"], symbol, timeframe, cfg, backtest_config, holdout_start,
+                                  _lag_dict(lag)))
+        for label, cfg, lag in lagged_variants(params, base_config)
     ]
-    earlier = earlier_runs([key for _, _, key in keyed])
+    earlier = earlier_runs([key for *_, key in keyed])
     runs = []
     computed: dict[str, tuple[str, dict]] = {}  # run_key -> (label, result) within this job
-    for label, strategy_config, key in keyed:
+    for label, strategy_config, lag, key in keyed:
         if key in earlier:
             runs.append({"label": f"{label} (earlier result)", "baseline": False, **reuse(earlier[key])})
         elif key in computed:
             first_label, result = computed[key]
             runs.append({"label": f"{label} (same as {first_label})", "baseline": False, **result})
         else:
-            result = run(params["strategy"], strategy_config)
+            result = run(params["strategy"], strategy_config, lag)
             computed[key] = (label, result)
             runs.append({"label": label, "baseline": False, **result})
     if params["baseline"] != "none":
@@ -295,7 +345,7 @@ def run_research_report(params: dict, fetch: bool = True, job: ResearchJob | Non
     def span(df):
         return f"{df.index.min():%Y-%m-%d}..{df.index.max():%Y-%m-%d} ({len(df)} bars)" if len(df) else "no data"
 
-    return {
+    report = {
         "header": {
             "strategy": params["strategy"], "symbol": symbol, "timeframe": timeframe,
             "train": span(windows["train"]), "test": span(windows["test"]),
@@ -304,6 +354,41 @@ def run_research_report(params: dict, fetch: bool = True, job: ResearchJob | Non
         },
         "runs": runs,
     }
+    if params.get("lag_levels"):
+        from research.lag import levels_for
+
+        levels, basis = levels_for(params["strategy"])
+        report["header"]["data_lag"] = {
+            **basis, "levels": {name: levels[name].describe() for name in params["lag_levels"]},
+        }
+        report["lag_decay"] = lag_decay(runs, params["lag_levels"])
+    return report
+
+
+def lag_decay(runs: list[dict], level_names: list[str]) -> list[dict]:
+    """Per variant, its test-window numbers at each lag level and how much
+    of the zero-lag (or first level's) return is left: how fast the edge
+    fades as the data arrives later."""
+    by_variant: dict[str, dict[str, dict]] = {}
+    for run in runs:
+        if run.get("baseline") or " @ lag " not in run["label"]:
+            continue
+        variant, rest = run["label"].split(" @ lag ", 1)
+        level = rest.split(" ", 1)[0]
+        by_variant.setdefault(variant, {})[level] = (run["windows"] or {}).get("test") or {}
+    out = []
+    for variant, levels in by_variant.items():
+        ref_name = "zero" if "zero" in levels else level_names[0]
+        ref = levels.get(ref_name, {}).get("total_return_pct")
+        rows = []
+        for name in level_names:
+            test = levels.get(name, {})
+            ret = test.get("total_return_pct")
+            kept = round(ret / ref, 2) if ref not in (None, 0) and ret is not None and ref > 0 else None
+            rows.append({"level": name, "total_return_pct": ret, "sharpe_ratio": test.get("sharpe_ratio"),
+                         "trades": test.get("trades"), "return_kept_vs_" + ref_name: kept})
+        out.append({"variant": variant, "levels": rows})
+    return out
 
 
 def run_job(job: ResearchJob, fetch: bool = True) -> ResearchJob:

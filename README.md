@@ -49,6 +49,20 @@ iPhones need the app added to the Home Screen first.
    sections it reads. Put its defaults in `config/config.yaml`.
 3. It now appears in the app's "New bot" form and research page. Run a research report from the app.
 
+### Simulating data lag in research
+
+Strategies that read outside data (`EXTERNAL_DATA` in `bot/strategy/registry.py`; today `funding_filtered`) can
+be researched with that data arriving as late as it really does live (`bot/data/availability.py`). Each value
+counts from the first bar close after `event_time + delay`. Research report jobs take
+`"lag_levels": ["zero", "typical", "p95", "double_p95", "p95_outages", "plus_1d"]` (each level is another
+variant against the hypothesis budget) and add a `lag_decay` table showing how much of the zero-lag return
+survives. Walk-forward jobs take one `"lag_level"`. Set pass bars at `p95`.
+
+The delays are **measured**. With `data_lag.measure_funding` on, the engine fetches funding on every bar poll,
+stamps each print's `fetched_at` and logs every fetch, failed or not, as a `FetchAttempt`
+(`backend/market/latency.py`). Until 30 live samples exist (about 10 days), the levels use the assumptions in
+`config.yaml`'s `data_lag` section. `GET /api/research/data-lag` shows which applies and the numbers behind it.
+
 ### Running locally
 
 ```

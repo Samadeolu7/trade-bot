@@ -43,12 +43,32 @@ def validate_walk_forward_params(params: dict) -> dict:
     test_months = params.get("test_months", 6)
     if test_months not in TEST_MONTHS:
         raise JobError(f"test_months must be one of {', '.join(map(str, TEST_MONTHS))}")
-    return {**base, "first_test": f"{first:%Y-%m-%d}", "test_months": test_months}
+    out = {**base, "first_test": f"{first:%Y-%m-%d}", "test_months": test_months}
+    lag_level = params.get("lag_level")
+    if lag_level:
+        from research.lag import LagError, validate_levels
+
+        try:
+            out["lag_level"] = validate_levels(base["strategy"], [lag_level])[0]
+        except LagError as exc:
+            raise JobError(str(exc)) from exc
+    return out
+
+
+def _lag(params: dict):
+    """The LagModel a walk-forward job runs with, or None."""
+    if not params.get("lag_level"):
+        return None
+    from research.lag import levels_for
+
+    return levels_for(params["strategy"])[0][params["lag_level"]]
 
 
 def _key(params: dict, strategy_config: dict, backtest_config: dict, holdout_start) -> str:
     name = f"{KIND}:{params['strategy']}:{params['first_test']}:{params['test_months']}"
-    return run_key(name, params["symbol"], params["timeframe"], strategy_config, backtest_config, holdout_start)
+    lag = _lag(params)
+    return run_key(name, params["symbol"], params["timeframe"], strategy_config, backtest_config, holdout_start,
+                   lag.to_dict() if lag is not None else None)
 
 
 def check_not_repeat_walk_forward(params: dict) -> None:
@@ -106,13 +126,14 @@ def run_walk_forward_report(params: dict, fetch: bool = True, job: ResearchJob |
                              fc.get("start_date", config["backfill"]["start_date"]))
         funding = funding_df(fc.get("exchange_id", "binanceusdm"), fc.get("symbol", "BTC/USDT:USDT"))
 
+    lag = _lag(params)
     end = pd.Timestamp(holdout, tz="UTC") if holdout else df.index[-1] + pd.Timedelta(seconds=1)
     folds = make_folds(df.index[0], pd.Timestamp(params["first_test"], tz="UTC"), end, params["test_months"])
     ppy = periods_per_year(timeframe)
 
     curves, trades, keys = {}, {}, {}
     for label, cfg in variants(params, config.get("strategy", {})):
-        result = run_strategy_backtest(df, strategy, cfg, backtest_config, funding, warmup_df=df)
+        result = run_strategy_backtest(df, strategy, cfg, backtest_config, funding, warmup_df=df, data_lag=lag)
         curves[label], trades[label] = result.equity_curve, result.trades
         keys[label] = (_key(params, cfg, backtest_config, holdout), cfg)
     wf = walk_forward(curves, trades, folds, timeframe)
@@ -155,6 +176,7 @@ def run_walk_forward_report(params: dict, fetch: bool = True, job: ResearchJob |
             "holdout": f"excluded from {holdout}" if holdout else "none configured",
             "costs": f"fee={backtest_config.get('fee', 0.001)} slippage={backtest_config.get('slippage', 0.0005)}",
             "variants": len(curves), "code": code_version(),
+            **({"data_lag": {"level": lag.name, "described": lag.describe(), "model": lag.to_dict()}} if lag else {}),
         },
         "folds": wf["folds"],
         "oos": wf["oos"],

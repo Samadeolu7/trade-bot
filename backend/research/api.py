@@ -266,7 +266,8 @@ def _variant_count(job_or_params) -> int:
     count = 1
     for values in (params.get("params") or {}).values():
         count *= len(values) if isinstance(values, list) else 1
-    return count
+    lags = params.get("lag_levels") or []
+    return count * max(1, len(lags) if isinstance(lags, list) else 1)
 
 
 class JobOut(Schema):
@@ -291,6 +292,10 @@ class JobIn(Schema):
     params: dict[str, list] = {}
     # the pre-registered idea this tests (required with a research key)
     hypothesis_id: int | None = None
+    # strategies that read outside data (funding_filtered): run every variant
+    # again with that data arriving late, at each of these levels (zero,
+    # typical, p95, double_p95, p95_outages, plus_1d). See GET /research/data-lag.
+    lag_levels: list[str] | None = None
 
 
 @router.get("/jobs", response=list[JobOut], auth=research_auth)
@@ -343,6 +348,9 @@ class WalkForwardJobIn(Schema):
     first_test: str = "2022-01-01"
     test_months: int = 6
     hypothesis_id: int | None = None
+    # strategies that read outside data: one simulated data-lag level for the
+    # whole job (e.g. "p95"); run one job per level to compare
+    lag_level: str | None = None
 
 
 @router.post("/walk-forward-jobs", response=JobOut, auth=research_auth)
@@ -570,3 +578,34 @@ def list_legacy_reports(request):
     their experiment rows."""
     return legacy_reports()
 
+
+
+class LagLevelOut(Schema):
+    level: str
+    described: str
+    model: dict
+
+
+class DataLagOut(Schema):
+    strategy: str
+    source: str
+    basis: str
+    use_at: str
+    measured: dict
+    levels: list[LagLevelOut]
+
+
+@router.get("/data-lag", response=DataLagOut, auth=research_auth)
+def data_lag(request, strategy: str = "funding_filtered"):
+    """The data-lag levels research jobs would simulate for a strategy that
+    reads outside data, and the live fetch measurements behind them
+    (`basis` is "assumed" until there are enough live samples)."""
+    from research.lag import LagError, levels_for
+
+    try:
+        levels, basis = levels_for(strategy)
+    except LagError as exc:
+        raise HttpError(400, str(exc)) from exc
+    return {"strategy": strategy, "source": basis["source"], "basis": basis["basis"], "use_at": basis["use_at"],
+            "measured": basis["measured"],
+            "levels": [{"level": name, "described": m.describe(), "model": m.to_dict()} for name, m in levels.items()]}

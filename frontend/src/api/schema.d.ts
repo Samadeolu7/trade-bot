@@ -839,6 +839,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/research/data-lag": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Data Lag
+         * @description The data-lag levels research jobs would simulate for a strategy that
+         *     reads outside data, and the live fetch measurements behind them
+         *     (`basis` is "assumed" until there are enough live samples).
+         */
+        get: operations["research_api_data_lag"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/research/experiments": {
         parameters: {
             query?: never;
@@ -1548,6 +1570,23 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** DataLagOut */
+        DataLagOut: {
+            /** Basis */
+            basis: string;
+            /** Levels */
+            levels: components["schemas"]["LagLevelOut"][];
+            /** Measured */
+            measured: {
+                [key: string]: unknown;
+            };
+            /** Source */
+            source: string;
+            /** Strategy */
+            strategy: string;
+            /** Use At */
+            use_at: string;
+        };
         /** DecisionIn */
         DecisionIn: {
             /** Decision */
@@ -1890,6 +1929,8 @@ export interface components {
             baseline: string;
             /** Hypothesis Id */
             hypothesis_id?: number | null;
+            /** Lag Levels */
+            lag_levels?: string[] | null;
             /**
              * Params
              * @default {}
@@ -1939,6 +1980,17 @@ export interface components {
             started_at: string | null;
             /** Status */
             status: string;
+        };
+        /** LagLevelOut */
+        LagLevelOut: {
+            /** Described */
+            described: string;
+            /** Level */
+            level: string;
+            /** Model */
+            model: {
+                [key: string]: unknown;
+            };
         };
         /** LedgerOut */
         LedgerOut: {
@@ -2648,6 +2700,8 @@ export interface components {
             first_test: string;
             /** Hypothesis Id */
             hypothesis_id?: number | null;
+            /** Lag Level */
+            lag_level?: string | null;
             /**
              * Params
              * @default {}
@@ -3923,6 +3977,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SwitchOut"];
+                };
+            };
+        };
+    };
+    research_api_data_lag: {
+        parameters: {
+            query?: {
+                strategy?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataLagOut"];
                 };
             };
         };

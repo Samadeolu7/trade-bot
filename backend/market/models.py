@@ -31,9 +31,31 @@ class FundingRate(models.Model):
     symbol = models.CharField(max_length=30)
     funding_time = models.DateTimeField()
     funding_rate = models.FloatField()
+    # when this system first stored the print. Rows the live engine picked
+    # up within a day of funding_time are the measured lag
+    # (market/latency.py); older rows are history backfills. Null for rows
+    # stored before this was recorded.
+    fetched_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(fields=["exchange", "symbol", "funding_time"], name="uniq_funding")
         ]
         ordering = ["funding_time"]
+
+
+class FetchAttempt(models.Model):
+    """One call to an outside data source (funding rates now, fundamentals
+    later), kept so research can model the lag and outages the live system
+    really has: how often fetches fail and for how long."""
+
+    source = models.CharField(max_length=40)
+    started_at = models.DateTimeField()
+    finished_at = models.DateTimeField()
+    ok = models.BooleanField()
+    new_rows = models.IntegerField(default=0)
+    error = models.CharField(max_length=300, blank=True, default="")
+
+    class Meta:
+        indexes = [models.Index(fields=["source", "started_at"])]
+        ordering = ["started_at"]

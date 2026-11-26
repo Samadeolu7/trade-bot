@@ -73,6 +73,8 @@ class Engine:
         self.exchange_id = trade_config["exchange"]["id"]
         self.backfill_start = trade_config["backfill"]["start_date"]
         self.funding_config = trade_config.get("funding", {})
+        self.funding_failing = False
+        self.measure_funding = bool(trade_config.get("data_lag", {}).get("measure_funding", False))
         self._exchange = None
         self.price_history = PriceHistory()
 
@@ -218,13 +220,21 @@ class Engine:
                 backfill_candles(self.exchange, self.exchange_id, symbol, timeframe, self.backfill_start)
             except Exception:
                 logger.exception("candle backfill %s %s failed", symbol, timeframe)
-        if any(x.strategy == "funding_filtered" for x in [*bots, *feeds]):
+        # also fetched with no funding bot running when data_lag.measure_funding
+        # is on, so the live lag (market/latency.py) is measured ahead of need
+        if self.measure_funding or any(x.strategy == "funding_filtered" for x in [*bots, *feeds]):
             try:
                 backfill_funding(self.funding_config.get("exchange_id", "binanceusdm"),
                                  self.funding_config.get("symbol", "BTC/USDT:USDT"),
                                  self.funding_config.get("start_date", self.backfill_start))
+                self.funding_failing = False
             except Exception:
-                logger.exception("funding backfill failed")
+                # logged once per failure streak: when Binance futures is
+                # unreachable this fails every poll (each try is still logged
+                # as a FetchAttempt, which is what measures the outage)
+                if not self.funding_failing:
+                    logger.exception("funding backfill failed")
+                self.funding_failing = True
         for bot in bots:
             self.run_bot(bot)
         for feed in feeds:

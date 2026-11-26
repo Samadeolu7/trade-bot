@@ -10,7 +10,7 @@ import pandas as pd
 
 from bot.data.exchange import fetch_ohlcv
 from bot.data.funding import create_funding_exchange, fetch_funding_rate_history
-from market.models import Candle, FundingRate
+from market.models import Candle, FetchAttempt, FundingRate
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,28 @@ def backfill_head(
     return total
 
 
+FUNDING_SOURCE = "funding"
+
+
 def backfill_funding(exchange_id: str, symbol: str, start_date: str) -> int:
+    """Stores new funding prints, stamping each with when it was first
+    stored, and logs the call as a FetchAttempt (success or failure) so the
+    live lag and outages can be measured (market/latency.py). Errors are
+    re-raised after logging."""
+    started = datetime.now(timezone.utc)
+    try:
+        total = _backfill_funding(exchange_id, symbol, start_date)
+    except Exception as exc:
+        FetchAttempt.objects.create(source=FUNDING_SOURCE, started_at=started,
+                                    finished_at=datetime.now(timezone.utc), ok=False,
+                                    error=f"{type(exc).__name__}: {exc}"[:300])
+        raise
+    FetchAttempt.objects.create(source=FUNDING_SOURCE, started_at=started, finished_at=datetime.now(timezone.utc),
+                                ok=True, new_rows=total)
+    return total
+
+
+def _backfill_funding(exchange_id: str, symbol: str, start_date: str) -> int:
     exchange = create_funding_exchange(exchange_id)
     since = ccxt.Exchange.parse8601(start_date)
     latest = (
@@ -118,7 +139,7 @@ def backfill_funding(exchange_id: str, symbol: str, start_date: str) -> int:
         FundingRate.objects.bulk_create(
             [
                 FundingRate(exchange=exchange_id, symbol=symbol, funding_time=_ms_to_dt(r["timestamp"]),
-                            funding_rate=r["fundingRate"])
+                            funding_rate=r["fundingRate"], fetched_at=datetime.now(timezone.utc))
                 for r in rates
             ],
             ignore_conflicts=True,

@@ -780,6 +780,48 @@
         "title": "ConcludeIn",
         "type": "object"
       },
+      "DataLagOut": {
+        "properties": {
+          "basis": {
+            "title": "Basis",
+            "type": "string"
+          },
+          "levels": {
+            "items": {
+              "$ref": "#/components/schemas/LagLevelOut"
+            },
+            "title": "Levels",
+            "type": "array"
+          },
+          "measured": {
+            "additionalProperties": true,
+            "title": "Measured",
+            "type": "object"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "strategy": {
+            "title": "Strategy",
+            "type": "string"
+          },
+          "use_at": {
+            "title": "Use At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategy",
+          "source",
+          "basis",
+          "use_at",
+          "measured",
+          "levels"
+        ],
+        "title": "DataLagOut",
+        "type": "object"
+      },
       "DecisionIn": {
         "properties": {
           "decision": {
@@ -1740,6 +1782,20 @@
             ],
             "title": "Hypothesis Id"
           },
+          "lag_levels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lag Levels"
+          },
           "params": {
             "additionalProperties": {
               "items": {},
@@ -1852,6 +1908,30 @@
           "finished_at"
         ],
         "title": "JobOut",
+        "type": "object"
+      },
+      "LagLevelOut": {
+        "properties": {
+          "described": {
+            "title": "Described",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "model": {
+            "additionalProperties": true,
+            "title": "Model",
+            "type": "object"
+          }
+        },
+        "required": [
+          "level",
+          "described",
+          "model"
+        ],
+        "title": "LagLevelOut",
         "type": "object"
       },
       "LedgerOut": {
@@ -3709,6 +3789,17 @@
               }
             ],
             "title": "Hypothesis Id"
+          },
+          "lag_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lag Level"
           },
           "params": {
             "additionalProperties": {
@@ -6098,6 +6189,48 @@
         "summary": "Set Switch",
         "tags": [
           "recommendations"
+        ]
+      }
+    },
+    "/api/research/data-lag": {
+      "get": {
+        "description": "The data-lag levels research jobs would simulate for a strategy that\nreads outside data, and the live fetch measurements behind them\n(`basis` is \"assumed\" until there are enough live samples).",
+        "operationId": "research_api_data_lag",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "strategy",
+            "required": false,
+            "schema": {
+              "default": "funding_filtered",
+              "title": "Strategy",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataLagOut"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "ResearchKeyAuth": []
+          },
+          {
+            "SessionAuth": []
+          }
+        ],
+        "summary": "Data Lag",
+        "tags": [
+          "research"
         ]
       }
     },
