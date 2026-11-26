@@ -712,3 +712,38 @@ so about 60 are expected).
 **Caveat:** 50-60 trades is a sanity check, not proof. At the backtest's
 ~0.04% net per trade the result can easily be negative by chance even if
 the edge is real, and positive by chance if it isn't.
+
+## 2026-11-26 — Hypothesis #8: the funding filter under realistic data lag (pre-registered)
+
+First use of the data-lag simulation (bot/data/availability.py). Registered
+in the app before any funding_filtered result has been seen: no
+funding_filtered job had ever run on the server, and the research machine
+couldn't reach Binance futures (#6, #7).
+
+- Statement: vetoing Donchian entries when perpetual funding is crowded
+  (funding_filtered, base donchian, thresholds +0.0005 / -0.0005, the
+  config defaults, an untested guess fixed now and not tuned under this
+  hypothesis) improves Donchian on BTC/USDT 4h, and the improvement holds
+  when funding arrives as late as it really does live.
+- Lag levels: assumed until the engine has 30 live samples (about 10
+  days), currently 2m typical / 15m p95 / 6h outages on 5% of prints. Each
+  report records which basis and delays it ran with.
+- Runs (budget 6 variants):
+  1. Research report, funding_filtered 4h, lag levels zero, p95,
+     p95_outages, plus_1d, baseline donchian (4 variants).
+  2. Walk-forward, funding_filtered 4h at lag p95, 6-month folds from
+     2022-01-01 to the holdout (1 variant).
+  One spare, only for a rerun if a job fails for infrastructure reasons.
+- Pass, all of:
+  - test window (2024-01-01 to the holdout) at p95: Sharpe and total
+    return both above plain donchian's;
+  - at p95_outages: Sharpe still above plain donchian's;
+  - walk-forward at p95: deflated Sharpe probability >= 0.95 and at least
+    half the folds positive (the same bar as #1).
+- Fail otherwise. A filter that only helps at zero lag counts as a fail.
+- Reading plus_1d: funding prints every 8h and the filter is meant as a
+  slow positioning signal, so it should survive a day of delay. If
+  plus_1d is much better than p95, that's suspicious (a timing artefact),
+  not a bonus.
+- Caveat: the train window (2020-2023) was not used to choose the
+  thresholds, but donchian itself was chosen after seeing 2024+ results.
