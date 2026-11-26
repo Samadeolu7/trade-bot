@@ -747,3 +747,31 @@ couldn't reach Binance futures (#6, #7).
   not a bonus.
 - Caveat: the train window (2020-2023) was not used to choose the
   thresholds, but donchian itself was chosen after seeing 2024+ results.
+
+### Result #8 (jobs #51, #52; app hypothesis 6): FAIL on the pre-registered bar
+
+Lag levels ran on assumed delays (no live samples yet; the server's
+funding fetches from Binance futures all succeeded).
+
+| Test window 2024-01-01..2026-02-28 | Trades | Return | Sharpe |
+|---|---|---|---|
+| donchian (baseline) | 46 | +8.09% | 0.61 |
+| funding_filtered at zero / p95 / p95_outages / plus_1d | 46 | +8.09% | 0.61 |
+
+- The filter never vetoed a test-window entry: BTC funding at donchian's
+  entry bars stayed under +0.0005. Equal to the baseline is not "above",
+  so the p95 and p95_outages criteria fail. The lag levels couldn't
+  differ because there was nothing to delay.
+- Train window (2020-2023): it vetoed about one trade and that cost
+  money (+29.21% vs donchian's +30.21%; with plus_1d the veto missed and
+  it matched donchian).
+- Walk-forward at p95 (9 folds from 2022): +18.89%, Sharpe 0.69, 7/9
+  folds positive, deflated Sharpe probability 0.92 over 6 trials (below
+  0.95), bootstrap Sharpe -0.29..1.59. This is essentially donchian's own
+  record, since the filter almost never fires.
+- Conclusion: at the pre-set threshold the funding filter is inert on
+  BTC 4h. Not re-tuned on these results. A version with a threshold set
+  by a rule on 2020-2023 data only (e.g. a percentile of that period's
+  funding) would be a new, separately registered hypothesis.
+- Infrastructure check passed: lag levels ran as separate recorded
+  variants, each report states its delays and basis.
