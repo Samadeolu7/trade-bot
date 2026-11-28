@@ -1917,6 +1917,8 @@ export interface components {
              * @default all
              */
             batch: string;
+            /** Events */
+            events?: string[] | null;
             /** Hypothesis Id */
             hypothesis_id?: number | null;
         };

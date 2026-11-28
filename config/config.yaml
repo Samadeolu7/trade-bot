@@ -109,6 +109,9 @@ strategy:
     base_strategy: donchian   # any TREND_STRATEGY_CHOICES entry — the strategy being filtered
     high_threshold: 0.0005    # veto new longs when funding rate exceeds this (crowded-long risk) — untested guess, sweep it
     low_threshold: -0.0005    # veto new shorts when funding rate is below this (crowded-short risk)
+    percentile: null          # research: e.g. 0.9 = veto longs when funding is in its top 10% over the trailing window (and shorts in the bottom 10%); replaces the fixed thresholds
+    window_days: 365          # trailing window for the percentile thresholds
+    min_days: 90              # no veto until this much funding history exists
 
 # Perpetual funding-rate history (spec Section 7d) for funding_filtered —
 # read-only, futures-only data (Binance spot has no funding), unrelated to

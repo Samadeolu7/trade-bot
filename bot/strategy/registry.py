@@ -238,6 +238,9 @@ def _build_unwrapped(
             low_threshold,
             refresh_fn=funding_refresh_fn,
             lag=data_lag,
+            percentile=funding_filtered_config.get("percentile"),
+            window_days=funding_filtered_config.get("window_days", 365),
+            min_days=funding_filtered_config.get("min_days", 90),
         )
 
     # regime_switched: trend/ranging sub-strategies and regime-filter type are

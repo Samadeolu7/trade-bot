@@ -5,6 +5,7 @@ stay honest."""
 
 import json
 import logging
+import os
 
 import pandas as pd
 from django.utils import timezone
@@ -26,12 +27,34 @@ HISTORY_FROM = "2020-02-01"  # stored history must start by then, or the downloa
 
 def validate_intraday_params(params: dict) -> dict:
     batch = str(params.get("batch") or "all").upper()
+    if batch == "MACRO":
+        return _validate_macro(params)
     if batch not in ("A", "B", "ALL"):
-        raise JobError("batch must be A, B or all")
+        raise JobError("batch must be A, B, all or macro")
     return {"hypothesis": 7, "batch": "all" if batch == "ALL" else batch}
 
 
+def _validate_macro(params: dict) -> dict:
+    """Hypothesis #9: the range breakout with scheduled macro event days
+    skipped. CPI and jobs-report dates come from FRED and need FRED_API_KEY
+    on the server."""
+    from bot.data.macro_calendar import FRED_RELEASES, KINDS
+
+    events = params.get("events") or ["fomc"]
+    if not isinstance(events, list) or any(e not in KINDS for e in events):
+        raise JobError(f"events must be a list from {', '.join(KINDS)}")
+    events = [k for k in KINDS if k in events]  # canonical order
+    if any(e in FRED_RELEASES for e in events) and not os.environ.get("FRED_API_KEY"):
+        raise JobError("cpi and nfp release dates come from FRED, which needs FRED_API_KEY in the server's .env; "
+                       "run with events [\"fomc\"] until then")
+    return {"hypothesis": 9, "batch": "macro", "events": events}
+
+
 def variant_count(params: dict) -> int:
+    if params.get("batch") == "macro":
+        from bot.research.macro_report import variants
+
+        return len(variants(params["events"]))
     return sum(R.VARIANTS.values()) if params["batch"] == "all" else R.VARIANTS[params["batch"]]
 
 
@@ -46,13 +69,13 @@ def check_not_repeat_intraday(params: dict) -> None:
         raise RepeatJobError(f"Already run with exactly these settings on the current code (job #{done.pk}).")
 
 
-def _record(job, label: str, scored: dict, holdout: str, df) -> None:
-    key = run_key(f"{KIND}7:{label}", SYMBOL, TIMEFRAME, {}, {"judge": R.JUDGE, "robust": R.ROBUST}, holdout)
+def _record(job, label: str, scored: dict, holdout: str, df, hypothesis: int = 7) -> None:
+    key = run_key(f"{KIND}{hypothesis}:{label}", SYMBOL, TIMEFRAME, {}, {"judge": R.JUDGE, "robust": R.ROBUST}, holdout)
     Experiment.objects.create(
         run_key=key, job=job, hypothesis_id=job.hypothesis_id if job else None, git_commit=code_version(),
         created_at=timezone.now(), kind=KIND, strategy=label.split(" ")[0][:40], strategy_label=label,
         symbol=SYMBOL, timeframe=TIMEFRAME, window_start=str(df.index.min()), window_end=str(df.index.max()),
-        touched_holdout=False, config={"hypothesis": 7, "variant": label}, config_hash=key[:12],
+        touched_holdout=False, config={"hypothesis": hypothesis, "variant": label}, config_hash=key[:12],
         data_version=f"{len(df)} bars, {df.index.min()}–{df.index.max()}",
         result=json.loads(json.dumps(scored, default=str)),
     )
@@ -77,10 +100,12 @@ def run_intraday_report(params: dict, fetch: bool = True, job: ResearchJob | Non
         first = f"{df.index.min():%Y-%m-%d}" if len(df) else "nothing"
         raise JobError(f"{SYMBOL} {TIMEFRAME} history before the holdout starts at {first}, not 2020: "
                        "the download is incomplete")
-    days, folds = R.setup(df)
-
     def log(msg):
         logger.info("intraday job %s:%s", job.pk if job else "-", msg)
+
+    if params.get("batch") == "macro":
+        return _run_macro(params, df, holdout, job, log)
+    days, folds = R.setup(df)
 
     batches = {}
     for name in (("A", "B") if params["batch"] == "all" else (params["batch"],)):
@@ -100,6 +125,32 @@ def run_intraday_report(params: dict, fetch: bool = True, job: ResearchJob | Non
             "trials": R.TRIALS, "code": code_version(),
         },
         "batches": batches,
+    }
+
+
+def _run_macro(params: dict, df, holdout, job, log) -> dict:
+    from bot.data import macro_calendar as M
+    from bot.research import macro_report as MR
+
+    fred = {}
+    for kind in params["events"]:
+        if kind in M.FRED_RELEASES:
+            fred[kind] = M.fetch_fred_release_dates(kind, os.environ["FRED_API_KEY"])
+    rows, evidence = MR.run(df, params["events"], fred, log)
+    for row in rows:
+        _record(job, row["label"], row, holdout, df, hypothesis=9)
+    return {
+        "header": {
+            "hypothesis": 9, "symbol": SYMBOL, "timeframe": TIMEFRAME,
+            "data": f"{df.index.min():%Y-%m-%d}..{df.index.max():%Y-%m-%d} ({len(df)} bars)",
+            "strategy": "orb range 60m, stop at mid, 24/7, flat by 23:45 UTC (hypothesis #7's best)",
+            "events": params["events"], "event_source": "FOMC: federalreserve.gov; CPI/NFP: FRED release dates",
+            "holdout": f"excluded from {holdout}" if holdout else "none configured",
+            "costs": f"judged at {R.JUDGE:.2%} round trip, must still profit at {R.ROBUST:.2%}",
+            "evidence_window": f"trades entered from {MR.FIRST_TEST:%Y-%m-%d}", "code": code_version(),
+        },
+        "batches": {"macro": {"title": "Range breakout with scheduled macro event days skipped", "rows": rows}},
+        "event_days": evidence,
     }
 
 

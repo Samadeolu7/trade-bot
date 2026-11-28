@@ -25,7 +25,16 @@ class FundingFilteredStrategy(Strategy):
 
     `lag` (backtests only): a LagModel saying when each print would really
     have reached the engine; see bot/data/availability.py. Without one, the
-    rate is looked up at each bar's open time, as the live path does."""
+    rate is looked up at each bar's open time, as the live path does.
+
+    Thresholds: fixed (`high_threshold` / `low_threshold`), or with
+    `percentile` set, trailing percentiles of funding itself: a long is
+    vetoed when funding is above its `percentile` over the last
+    `window_days` (and a short below its 1 - `percentile`). Each print's
+    thresholds use only prints at or before it, so there is no look-ahead,
+    and they arrive with that print under any lag model. Until
+    `min_days` of history exist there are no thresholds and nothing is
+    vetoed."""
 
     name = "funding_filtered"
 
@@ -37,6 +46,9 @@ class FundingFilteredStrategy(Strategy):
         low_threshold: float,
         refresh_fn: Callable[[], pd.DataFrame] | None = None,
         lag: LagModel | None = None,
+        percentile: float | None = None,
+        window_days: int = 365,
+        min_days: int = 90,
     ):
         super().__init__({})
         self.base = base
@@ -48,35 +60,66 @@ class FundingFilteredStrategy(Strategy):
         # and pass no refresh_fn.
         self.refresh_fn = refresh_fn
         self.lag = lag
+        if percentile is not None and not 0.5 < percentile < 1:
+            raise ValueError(f"funding_filtered percentile must be between 0.5 and 1, got {percentile!r}")
+        self.percentile = percentile
+        self.window_days = int(window_days)
+        self.min_days = int(min_days)
+        self._levels_cache: tuple[pd.DataFrame, pd.DataFrame] | None = None
         self.min_lookback = base.min_lookback
+
+    def levels(self) -> pd.DataFrame:
+        """Per print (indexed by funding_time): its rate and the veto
+        thresholds in force from that print on."""
+        df = self.funding_df
+        if self._levels_cache is not None and self._levels_cache[0] is df:
+            return self._levels_cache[1]
+        rate = df["funding_rate"].astype(float)
+        if self.percentile is None:
+            out = pd.DataFrame({"rate": rate, "high": self.high_threshold, "low": self.low_threshold},
+                               index=df.index)
+        else:
+            window = rate.rolling(f"{self.window_days}D")
+            enough = (rate.index - rate.index[0]) >= pd.Timedelta(days=self.min_days) if len(rate) else []
+            high = window.quantile(self.percentile).where(enough)
+            low = window.quantile(1 - self.percentile).where(enough)
+            out = pd.DataFrame({"rate": rate, "high": high, "low": low}, index=df.index)
+        self._levels_cache = (df, out)
+        return out
 
     def before_poll(self) -> None:
         if self.refresh_fn is not None:
             self.funding_df = self.refresh_fn().sort_index()
 
-    def _funding_rate_at(self, timestamp) -> float | None:
+    def _levels_at(self, timestamp) -> tuple[float | None, float, float]:
+        """(rate, high, low) at-or-before timestamp; thresholds are NaN
+        (never veto) while a percentile filter is still warming up."""
         if len(self.funding_df) == 0:
             # an empty index built with no rows defaults to tz-naive, which
             # would raise comparing against a tz-aware timestamp below
-            return None
-        eligible = self.funding_df.loc[:timestamp]
+            return None, float("nan"), float("nan")
+        eligible = self.levels().loc[:timestamp]
         if len(eligible) == 0:
-            return None
-        return float(eligible["funding_rate"].iloc[-1])
+            return None, float("nan"), float("nan")
+        row = eligible.iloc[-1]
+        return float(row["rate"]), float(row["high"]), float(row["low"])
+
+    def _funding_rate_at(self, timestamp) -> float | None:
+        return self._levels_at(timestamp)[0]
 
     def generate_signal(self, df: pd.DataFrame) -> Signal | None:
         signal = self.base.generate_signal(df)
         if signal is None:
             return None
-        rate = self._funding_rate_at(df.index[-1])
+        rate, high, low = self._levels_at(df.index[-1])
         if rate is None:
             # no funding data yet (e.g. still backfilling on a fresh shadow
             # run) — pass the base signal through unfiltered rather than
             # blocking every entry until funding history exists
             return signal
-        if signal.direction == "long" and rate > self.high_threshold:
+        if signal.direction == "long" and rate > high:
             return None
-        if signal.direction == "short" and rate < self.low_threshold:
+        if signal.direction == "short" and rate < low:
             return None
         return replace(signal, context={**signal.context, "funding_rate": round(rate, 6)})
 
@@ -85,21 +128,17 @@ class FundingFilteredStrategy(Strategy):
         if len(self.funding_df) == 0:
             return base_signals
 
+        levels = self.levels()
         if self.lag is not None and len(df) >= 2:
-            funding = asof_values(self.funding_df["funding_rate"], df.index, self.lag)
+            at = pd.DataFrame({c: asof_values(levels[c], df.index, self.lag) for c in levels.columns})
         else:
             left = pd.DataFrame({"open_time": df.index}).sort_values("open_time")
-            right = (
-                self.funding_df.reset_index()[["funding_time", "funding_rate"]]
-                .sort_values("funding_time")
-            )
-            merged = pd.merge_asof(
-                left, right, left_on="open_time", right_on="funding_time", direction="backward"
-            )
-            funding = pd.Series(merged["funding_rate"].to_numpy(), index=df.index)
+            right = levels.rename_axis("funding_time").reset_index().sort_values("funding_time")
+            merged = pd.merge_asof(left, right, left_on="open_time", right_on="funding_time", direction="backward")
+            at = pd.DataFrame({c: merged[c].to_numpy() for c in levels.columns}, index=df.index)
 
-        vetoed_long = (base_signals["direction"] == "long") & (funding > self.high_threshold)
-        vetoed_short = (base_signals["direction"] == "short") & (funding < self.low_threshold)
+        vetoed_long = (base_signals["direction"] == "long") & (at["rate"] > at["high"])
+        vetoed_short = (base_signals["direction"] == "short") & (at["rate"] < at["low"])
         result = base_signals.copy()
         result.loc[(vetoed_long | vetoed_short).fillna(False), "direction"] = None
         return result
@@ -115,7 +154,7 @@ class FundingFilteredStrategy(Strategy):
         more actionable) situation than the base's own generic near-miss, so
         it takes precedence when both are true."""
         result = dict(self.base.diagnose(df))
-        rate = self._funding_rate_at(df.index[-1])
+        rate, high, low = self._levels_at(df.index[-1])
         result["funding_rate"] = rate
         if rate is None:
             return result
@@ -123,18 +162,18 @@ class FundingFilteredStrategy(Strategy):
         base_signal = self.base.generate_signal(df)
         if base_signal is None:
             return result
-        if base_signal.direction == "long" and rate > self.high_threshold:
+        if base_signal.direction == "long" and rate > high:
             result["near_miss"] = True
             result["near_miss_key"] = "long_signal_vetoed_by_funding"
             result["near_miss_reason"] = (
                 f"{self.base.name} would enter long here, but funding rate {rate:.5f} "
-                f"exceeds the veto threshold {self.high_threshold:.5f} (crowded-long risk)"
+                f"exceeds the veto threshold {high:.5f} (crowded-long risk)"
             )
-        elif base_signal.direction == "short" and rate < self.low_threshold:
+        elif base_signal.direction == "short" and rate < low:
             result["near_miss"] = True
             result["near_miss_key"] = "short_signal_vetoed_by_funding"
             result["near_miss_reason"] = (
                 f"{self.base.name} would enter short here, but funding rate {rate:.5f} "
-                f"is below the veto threshold {self.low_threshold:.5f} (crowded-short risk)"
+                f"is below the veto threshold {low:.5f} (crowded-short risk)"
             )
         return result
